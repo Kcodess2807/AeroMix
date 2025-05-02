@@ -1,6 +1,6 @@
-# Air DJ
+# AEROMIX
 
-Air DJ is a touchless DJ system that leverages OpenCV and YOLO for real-time hand gesture recognition. It allows users to control music features such as bass, volume, scratching, looping, and effects using intuitive gestures, creating a futuristic and interactive DJ experience. The system also includes a dynamic music visualizer and supports multi-hand detection for more complex controls.
+AeroMix is a touchless DJ system that leverages OpenCV and YOLO for real-time hand gesture recognition. It allows users to control music features such as bass, volume, scratching, looping, and effects using intuitive gestures, creating a futuristic and interactive DJ experience. The system also includes a dynamic music visualizer and supports multi-hand detection for more complex controls.
 
 ## Features
 
@@ -34,7 +34,7 @@ LICENSE
 
 ## Contributing
 
-Contributions are welcome! Please open issues or submit pull requests to help improve Air DJ.
+Contributions are welcome! Please open issues or submit pull requests to help improve AEROMIX.
 
 ## License
 
