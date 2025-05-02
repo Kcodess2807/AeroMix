@@ -4,10 +4,18 @@ AeroMix is a touchless DJ system that leverages OpenCV and YOLO for real-time ha
 
 ## Features
 
-- **Real-time hand gesture detection:** Uses computer vision to recognize and interpret DJ gestures.
-- **Intuitive music controls:** Adjust bass, volume, apply effects, and perform scratching or looping-all with your hands in the air.
-- **Dynamic visualizer:** Visual feedback responds to music and user gestures.
-- **Multi-hand detection:** Recognizes multiple hands for advanced, multi-control interactions.
+- **Real-time hand gesture detection:** Uses advanced computer vision (OpenCV and YOLO) to recognize and interpret DJ gestures instantly for seamless control.
+
+- **Intuitive music controls:**
+  - **Tempo:** Adjust the speed (BPM) of your tracks in real time, enabling smooth beatmatching and creative transitions.
+  - **Pitch:** Change the pitch of audio independently or in sync with tempo, allowing for key changes, harmonic mixing, or vinyl-style effects.
+  - **Effects:** Apply DJ effects such as filters, echoes, and reverbs using hand gestures, adding dynamic expression to your mixes.
+  - **Playback sequence:** Control track playback, trigger loops, jump to cue points, or rearrange song sections with intuitive gestures for live remixing and creative arrangements.
+
+- **Dynamic visualizer:** Visual feedback responds to both music and user gestures, enhancing the interactive experience.
+
+- **Multi-hand detection:** Recognizes and processes multiple hands for advanced, multi-control interactions, enabling complex DJ techniques and simultaneous feature adjustments.
+
 
 ## Project Structure
 
