@@ -61,6 +61,18 @@ class SoundController:
             
         return self.volume
     
+    def adjust_bass(self, value):
+        """Adjust the bass level"""
+        self.bass = max(0.0, min(1.0, self.bass + value))
+        
+        # Send OSC message to Max/MSP
+        if self.osc_handler:
+            self.osc_handler.send_message("/bass", self.bass)
+            
+        # Note: Pygame mixer doesn't have built-in EQ control,
+        # so we rely on Max/MSP to handle the actual bass adjustment
+        return self.bass
+    
     def apply_effect(self, effect_name, value):
         """Apply an audio effect"""
         if effect_name in self.effects:
