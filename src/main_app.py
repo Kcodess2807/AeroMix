@@ -34,12 +34,12 @@ class AeroMixApp:
     def setup_osc_handlers(self):
         """Set up OSC message handlers"""
         # Handler for receiving landmarks from Max/MSP
-        self.osc_handler.add_handler("/landmarks", self.handle_landmarks)
+        self.osc_handler.adding_handler("/landmarks", self.handle_landmarks)
         
         # Handler for training commands
-        self.osc_handler.add_handler("/training/start", self.start_training)
-        self.osc_handler.add_handler("/training/record", self.record_training_sample)
-        self.osc_handler.add_handler("/training/stop", self.stop_training)
+        self.osc_handler.adding_handler("/training/start", self.start_training)
+        self.osc_handler.adding_handler("/training/record", self.record_training_sample)
+        self.osc_handler.adding_handler("/training/stop", self.stop_training)
         
         # Start the OSC server
         self.osc_server_thread = self.osc_handler.start_server()

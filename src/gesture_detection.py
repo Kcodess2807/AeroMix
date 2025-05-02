@@ -11,7 +11,7 @@ class GestureDetector:
         self.use_yolo = use_yolo
         
         if self.use_mediapipe:
-            self.mp_holistic=mp.solution.hoslistic
+            self.mp_holistic=mp.solutions.holistic
             self.holistic=self.mp_holistic.Holistic(
                 min_detection_confidence=0.5,
                 min_tracking_confidence=0.5
@@ -24,7 +24,7 @@ class GestureDetector:
             results=self.holistic.process(rgb_frame)
 
             #extracting landmarks
-            landmarks=self.__extract_mediapipe_landmarks(results)
+            landmarks=self._extract_mediapipe_landmarks(results)
             return landmarks
         
         return None
@@ -75,6 +75,6 @@ class GestureDetector:
     def visualize_landmarks(self, frame, landmarks):
         #drawin the landmarks on the frame
         pass
-    
+
 
 
