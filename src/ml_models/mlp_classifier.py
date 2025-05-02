@@ -59,7 +59,7 @@ class GestureClassifier:
         features=self.preprocess_landmarks(landmarks)
 
         #scaling the features
-        features_scaled=self.self.scaler.transform(features)
+        features_scaled=self.scaler.transform(features)
 
         #prediciton
         return self.model.predict(features_scaled)
