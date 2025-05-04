@@ -52,17 +52,29 @@ class GestureClassifier:
         print("Model trained successfully")
 
     def predict(self, landmarks):
-        "gesture class ko predict krega from landmarks"
+        """Predict the gesture class from landmarks"""
         if self.model is None:
-            raise ValueError("Model not trained or loaded.")
+            raise ValueError("Model not trained or loaded")
+            
+        # Preprocess the landmarks
+        features = self.preprocess_landmarks(landmarks)
 
-        features=self.preprocess_landmarks(landmarks)
+        #checking if any feature array is empty
+        if features.size==0 or features.shape[1]==0:
+            return "NO GESTURE"
 
-        #scaling the features
-        features_scaled=self.scaler.transform(features)
+        # Check if scaler is initialized
+        if self.scaler is None:
+            # Initialize with default scaler if not loaded from a model
+            self.scaler = StandardScaler()
+            self.scaler.fit(features)
+        
+        # Scale the features
+        features_scaled = self.scaler.transform(features)
+        
+        # Make prediction
+        return self.model.predict(features_scaled)[0]
 
-        #prediciton
-        return self.model.predict(features_scaled)
     
     def save_model(self, model_path):
         if self.model is None:
