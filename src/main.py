@@ -11,7 +11,7 @@ from sound_control import SoundController
 class AeroMixApp:
     def __init__(self, model_dir="model/trained", training_mode=False):
         # Initialize components
-        self.osc_handler = OSCHandler()
+        self.osc_handler = OSCHandler(receive_port=5005, send_port=5006)  # Updated ports for PD
         self.sound_controller = SoundController(self.osc_handler)
         self.trainer = GestureTrainer(save_dir=model_dir)
         
@@ -43,11 +43,17 @@ class AeroMixApp:
                 print(f"Loaded model for gesture: {gesture_name}")
         
     def setup_osc_handlers(self):
-        """Set up OSC message handlers"""
-        # Handler for receiving landmarks from Max/MSP
-        self.osc_handler.add_handler("/landmarks", self.handle_landmarks)
+        """Set up OSC message handlers for Pure Data"""
+        # Handler for receiving landmarks from Pure Data
+        self.osc_handler.add_handler("/pd/landmarks", self.handle_landmarks)
         
         # Handlers for training commands
+        self.osc_handler.add_handler("/pd/training/start", self.start_training)
+        self.osc_handler.add_handler("/pd/training/record", self.record_training_sample)
+        self.osc_handler.add_handler("/pd/training/stop", self.stop_training)
+        
+        # For backward compatibility, keep the original handlers too
+        self.osc_handler.add_handler("/landmarks", self.handle_landmarks)
         self.osc_handler.add_handler("/training/start", self.start_training)
         self.osc_handler.add_handler("/training/record", self.record_training_sample)
         self.osc_handler.add_handler("/training/stop", self.stop_training)
@@ -56,11 +62,24 @@ class AeroMixApp:
         self.osc_server_thread = self.osc_handler.start_server()
         
     def handle_landmarks(self, address, *args):
-        """Handle incoming landmark data from Max/MSP"""
+        """"Handle incoming landmark data from Pure Data"""
+        print(f"Received message at address: {address}")
+        print(f"Arguments: {args}")
         if len(args) > 0:
             try:
-                # Parse the JSON data
-                landmarks = json.loads(args[0])
+                # Check if the data is already JSON or a list of coordinates
+                if isinstance(args[0], str):
+                    try:
+                        # Try to parse as JSON (Max/MSP style)
+                        landmarks = json.loads(args[0])
+                    except json.JSONDecodeError:
+                        # If not JSON, might be a string representation of a list
+                        print(f"Received non-JSON data: {args[0][:100]}...")
+                        return
+                else:
+                    # Pure Data might send a flat list of coordinates
+                    # We need to reconstruct the landmark structure
+                    landmarks = self.reconstruct_landmarks_from_list(args)
                 
                 # Process the landmarks
                 if self.training_mode:
@@ -71,6 +90,38 @@ class AeroMixApp:
                     self.recognize_gesture(landmarks)
             except Exception as e:
                 print(f"Error processing landmarks: {e}")
+    
+    def reconstruct_landmarks_from_list(self, args):
+        """Reconstruct landmark structure from a flat list of coordinates"""
+        # This is a simplified example - adjust based on your actual data format
+        landmarks = {"pose": [], "left_hand": [], "right_hand": []}
+        
+        # If we have a flat list of coordinates
+        if len(args) > 0 and isinstance(args[0], (list, tuple)):
+            coords = args[0]
+        else:
+            coords = args
+            
+        # Process coordinates in pairs (x,y)
+        try:
+            # Assuming first 33*2 values are pose landmarks (if using MediaPipe pose)
+            pose_points = min(33*2, len(coords))
+            for i in range(0, pose_points, 2):
+                if i+1 < len(coords):
+                    landmarks["pose"].append({"x": float(coords[i]), "y": float(coords[i+1]), "z": 0.0})
+            
+            # Remaining points could be hand landmarks
+            # This is very simplified - you'll need to adjust based on your actual data
+            remaining = len(coords) - pose_points
+            if remaining > 0:
+                hand_points = min(21*2, remaining)  # 21 landmarks per hand in MediaPipe
+                for i in range(pose_points, pose_points + hand_points, 2):
+                    if i+1 < len(coords):
+                        landmarks["left_hand"].append({"x": float(coords[i]), "y": float(coords[i+1]), "z": 0.0})
+        except Exception as e:
+            print(f"Error reconstructing landmarks: {e}")
+            
+        return landmarks
     
     def recognize_gesture(self, landmarks):
         """Recognize gestures from landmarks and control sound"""
@@ -124,8 +175,18 @@ class AeroMixApp:
         """Record a training sample"""
         if len(args) > 1:
             try:
-                landmarks = json.loads(args[0])
-                is_gesture = bool(int(args[1]))  # 1 for green light, 0 for yellow light
+                # Check if first arg is JSON string or list
+                if isinstance(args[0], str):
+                    try:
+                        landmarks = json.loads(args[0])
+                    except json.JSONDecodeError:
+                        print(f"Error: Invalid JSON in training sample")
+                        return
+                else:
+                    landmarks = self.reconstruct_landmarks_from_list(args[:-1])
+                
+                # Last argument is the is_gesture flag
+                is_gesture = bool(int(args[-1]))  # 1 for green light, 0 for yellow light
                 
                 # Add to training data
                 self.trainer.add_sample(landmarks, is_gesture)
@@ -146,7 +207,7 @@ class AeroMixApp:
         self.running = True
         
         try:
-            print("AEROMIX is running. Press Ctrl+C to stop.")
+            print("AEROMIX is running with Pure Data. Press Ctrl+C to stop.")
             while self.running:
                 time.sleep(0.1)  # Just to prevent high CPU usage
                 
