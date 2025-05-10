@@ -22,8 +22,13 @@ class OSCHandler:
         print(f"handler succesfully added for address: {address}")
         
     def send_message(self, address, data):
-        """Send an OSC message to Max/MSP"""
-        self.client.send_message(address, data)
+        """Send an OSC message to Pure Data"""
+        print(f"Sending message to address: {address}")
+        print(f"Data: {data}")
+        if isinstance(data, (int, float)):
+            self.client.send_message(address, [data])
+        else:
+            self.client.send_message(address, data)
         
     def start_server(self):
         """Start the OSC server in a separate thread"""
