@@ -51,6 +51,10 @@ class GestureTrainer:
             is_gesture: True for green light moments (main gesture),
                        False for yellow light moments (other movements)
         """
+
+        print(f"add_sample called. Landmarks: {landmarks}, is_gesture: {is_gesture}")
+        self.training_data.append((landmarks, is_gesture))
+        print(f"Training data length is now: {len(self.training_data)}")
         if not self.is_training:
             return
             
@@ -69,7 +73,9 @@ class GestureTrainer:
         label = self.current_gesture if is_gesture else "OTHER"
         self.training_labels.append(label)
         
-        print(f"Added sample for {'gesture' if is_gesture else 'non-gesture'} (total: {len(self.training_data)})")
+        print(f"Adding sample: {landmarks}, is_gesture={is_gesture}")
+        print(f"Current training data length: {len(self.training_data)}")
+
     
     def train_model(self):
         """Train the model with collected samples"""
