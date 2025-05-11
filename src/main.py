@@ -42,6 +42,23 @@ class AeroMixApp:
                 self.gestures[gesture_name] = GestureClassifier(model_path)
                 print(f"Loaded model for gesture: {gesture_name}")
         
+    @staticmethod
+    def clean_args(args):
+        cleaned = []
+        for arg in args:
+            if isinstance(arg, str):
+                # Remove any trailing non-numeric characters
+                cleaned_arg = ''.join(c for c in arg if (c.isdigit() or c == '.' or c == '-'))
+                if cleaned_arg == '':
+                    continue
+                try:
+                    cleaned.append(float(cleaned_arg))
+                except ValueError:
+                    continue
+            else:
+                cleaned.append(arg)
+        return cleaned
+
     def setup_osc_handlers(self):
         """Set up OSC message handlers for Pure Data"""
         # Handler for receiving landmarks from Pure Data
@@ -65,6 +82,7 @@ class AeroMixApp:
         """"Handle incoming landmark data from Pure Data"""
         print(f"Received message at address: {address}")
         print(f"Arguments: {args}")
+        args=self.clean_args(args)
         if len(args) > 0:
             try:
                 # Check if the data is already JSON or a list of coordinates
