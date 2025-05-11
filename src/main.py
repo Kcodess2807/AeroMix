@@ -17,16 +17,18 @@ class AeroMixApp:
         self.sound_controller = SoundController(self.osc_handler)
         self.trainer = GestureTrainer(save_dir=model_dir)
         self.gestures = {}
+        self.model_dir = model_dir
         self.load_gesture_models(model_dir)
         self.running = False
         self.training_mode = training_mode
         self.webcam = None
         self.gesture_detector = GestureDetector()
-        self._detector_released = False  # NEW: track if detector is released
+        self._detector_released = False
         self.setup_osc_handlers()
 
     def load_gesture_models(self, model_dir):
         print(f"Loading gesture models from {model_dir}")
+        self.gestures = {}
         if not os.path.exists(model_dir):
             os.makedirs(model_dir, exist_ok=True)
             return
@@ -34,8 +36,12 @@ class AeroMixApp:
             if filename.endswith("_model.pkl"):
                 gesture_name = filename.replace("_model.pkl", "")
                 model_path = os.path.join(model_dir, filename)
-                self.gestures[gesture_name] = GestureClassifier(model_path)
-                print(f"Loaded model for gesture: {gesture_name}")
+                try:
+                    self.gestures[gesture_name] = GestureClassifier(model_path)
+                    print(f"Loaded model for gesture: {gesture_name} from {model_path}")
+                except Exception as e:
+                    print(f"Failed to load model for {gesture_name}: {e}")
+        print(f"Loaded gestures: {list(self.gestures.keys())}")
 
     @staticmethod
     def clean_args(args):
@@ -119,10 +125,14 @@ class AeroMixApp:
         detected_gestures = []
         for gesture_name, classifier in self.gestures.items():
             try:
-                prediction = classifier.predict(landmarks)
-                if prediction == gesture_name:
-                    detected_gestures.append(gesture_name)
-                    print(f"Detected gesture: {gesture_name}")
+                features = classifier.preprocess_landmarks(landmarks)
+                print(f"[DEBUG] Features for {gesture_name}: {features}")
+                if features.size > 0:
+                    prediction = classifier.predict(features)
+                    print(f"[DEBUG] Predicted: {prediction}, Target: {gesture_name}")
+                    if prediction == gesture_name:
+                        detected_gestures.append(gesture_name)
+                        print(f"Detected gesture: {gesture_name}")
             except Exception as e:
                 print(f"Error predicting with model {gesture_name}: {e}")
         for gesture in detected_gestures:
@@ -196,7 +206,6 @@ class AeroMixApp:
                     if not ret:
                         print("Failed to grab frame from webcam")
                         break
-                    # Only call detect_landmarks if detector is not released
                     if not self._detector_released:
                         try:
                             landmarks, annotated_frame = self.gesture_detector.detect_landmarks(frame)
@@ -275,6 +284,35 @@ class AeroMixApp:
                 cv2.imshow('Training Mode - Press q to stop', frame)
                 cv2.waitKey(1)
 
+    def run_recognition(self):
+        print("Starting real-time gesture recognition...")
+        print(f"Available gesture models: {list(self.gestures.keys())}")
+        if not self.start_webcam():
+            print("Could not open webcam for recognition.")
+            return
+        while True:
+            ret, frame = self.webcam.read()
+            if not ret:
+                break
+            frame = cv2.flip(frame, 1)
+            landmarks, annotated_frame = self.gesture_detector.detect_landmarks(frame)
+            if landmarks and (landmarks["left_hand"] or landmarks["right_hand"]):
+                for gesture_name, classifier in self.gestures.items():
+                    features = classifier.preprocess_landmarks(landmarks)
+                    print(f"[DEBUG] Features for {gesture_name}: {features}")
+                    if features.size > 0:
+                        pred = classifier.predict(features)
+                        print(f"[DEBUG] Predicted: {pred}, Target: {gesture_name}")
+                        if pred == gesture_name:
+                            print(f"Recognized gesture: {gesture_name}")
+                            self.process_gesture(gesture_name)
+                            cv2.putText(annotated_frame, f"Gesture: {gesture_name}", (20, 60),
+                                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0,255,0), 2)
+            cv2.imshow("Recognition Mode", annotated_frame)
+            if cv2.waitKey(1) & 0xFF == ord('q'):
+                break
+        self.stop_webcam()
+
     def stop_training(self, address, *args):
         print("Stopping training...")
         if hasattr(self, 'gesture_detector') and not self._detector_released:
@@ -294,8 +332,11 @@ class AeroMixApp:
         self.running = True
         try:
             print("AEROMIX is running with Pure Data. Press Ctrl+C to stop.")
-            while self.running:
-                time.sleep(0.1)
+            if self.training_mode:
+                while self.running:
+                    time.sleep(0.1)
+            else:
+                self.run_recognition()
         except KeyboardInterrupt:
             print("Shutting down AEROMIX...")
         finally:
