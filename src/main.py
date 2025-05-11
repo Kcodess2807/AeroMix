@@ -191,6 +191,7 @@ class AeroMixApp:
     
     def record_training_sample(self, address, *args):
         """Record a training sample"""
+        args = self.clean_args(args)
         if len(args) > 1:
             try:
                 # Check if first arg is JSON string or list
