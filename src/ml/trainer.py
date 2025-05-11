@@ -3,6 +3,7 @@ import os
 import json
 import time
 from .classifier import GestureClassifier
+import cv2
 
 class GestureTrainer:
     def __init__(self, save_dir="model/trained"):
@@ -16,13 +17,31 @@ class GestureTrainer:
         # Ensure save directory exists
         os.makedirs(self.save_dir, exist_ok=True)
     
-    def start_training(self, gesture_name):
-        #traning for a custom gesture
-        self.is_training = True
-        self.current_gesture = gesture_name
-        self.training_data = []
-        self.training_labels = []
-        print(f"Started training for gesture: {gesture_name}")
+    def start_training(self, address, *args):
+        """Start training mode for a gesture"""
+        # args = self.clean_args(args)
+        if len(args) > 0:
+            gesture_name = args[0]
+            self.trainer.start_training(gesture_name)
+            self.training_mode = True
+            
+            # Start the webcam for training
+            if self.start_webcam():
+                print(f"Started training for gesture: {gesture_name}")
+                print("Webcam activated for training. Press 'q' to stop training.")
+                
+                # Open a window to show the webcam feed
+                while self.training_mode and self.webcam.isOpened():
+                    # Show the webcam frame with instructions
+                    self.show_webcam_frame()
+                    
+                    # Break the loop if 'q' is pressed
+                    if cv2.waitKey(1) & 0xFF == ord('q'):
+                        self.stop_training(address)
+                        break
+            else:
+                print("Could not start webcam for training")
+
         
     def add_sample(self, landmarks, is_gesture=True):
         """Add a training sample

@@ -7,6 +7,7 @@ from utils.osc_handler import OSCHandler
 from ml.classifier import GestureClassifier
 from ml.trainer import GestureTrainer
 from sound_control import SoundController
+from utils.gesture_Detection import GestureDetector
 
 class AeroMixApp:
     def __init__(self, model_dir="model/trained", training_mode=False):
@@ -22,10 +23,13 @@ class AeroMixApp:
         # Application state
         self.running = False
         self.training_mode = training_mode
+        self.webcam = None  # Initialize webcam variable
         
+        self.gesture_detector=GestureDetector()
+
         # Set up OSC handlers
         self.setup_osc_handlers()
-        
+    
     def load_gesture_models(self, model_dir):
         """Load all trained gesture models"""
         if not os.path.exists(model_dir):
@@ -41,24 +45,34 @@ class AeroMixApp:
                 # Load the model
                 self.gestures[gesture_name] = GestureClassifier(model_path)
                 print(f"Loaded model for gesture: {gesture_name}")
-        
+    
     @staticmethod
     def clean_args(args):
         cleaned = []
         for arg in args:
+            # If it's a string, remove parentheses and whitespace
             if isinstance(arg, str):
-                # Remove any trailing non-numeric characters
-                cleaned_arg = ''.join(c for c in arg if (c.isdigit() or c == '.' or c == '-'))
-                if cleaned_arg == '':
+                # Remove parentheses and brackets completely
+                arg_no_paren = arg.replace("(", "").replace(")", "").replace("[", "").replace("]", "").strip()
+                # Skip if now empty
+                if not arg_no_paren:
                     continue
+                # Try to convert to float or int
                 try:
-                    cleaned.append(float(cleaned_arg))
+                    # Try int first for flags, then float
+                    if arg_no_paren.isdigit() or (arg_no_paren.startswith('-') and arg_no_paren[1:].isdigit()):
+                        cleaned.append(int(arg_no_paren))
+                    else:
+                        cleaned.append(float(arg_no_paren))
                 except ValueError:
-                    continue
+                    # If it's not a number, keep the string (for gesture names)
+                    if arg_no_paren:
+                        cleaned.append(arg_no_paren)
             else:
                 cleaned.append(arg)
         return cleaned
 
+    
     def setup_osc_handlers(self):
         """Set up OSC message handlers for Pure Data"""
         # Handler for receiving landmarks from Pure Data
@@ -75,14 +89,19 @@ class AeroMixApp:
         self.osc_handler.add_handler("/training/record", self.record_training_sample)
         self.osc_handler.add_handler("/training/stop", self.stop_training)
         
+        # Add a catch-all handler for debugging
+        self.osc_handler.dispatcher.set_default_handler(
+            lambda address, *args: print(f"DEFAULT HANDLER: {address} {args}")
+        )
+        
         # Start the OSC server
         self.osc_server_thread = self.osc_handler.start_server()
-        
+    
     def handle_landmarks(self, address, *args):
-        """"Handle incoming landmark data from Pure Data"""
+        """Handle incoming landmark data from Pure Data"""
         print(f"Received message at address: {address}")
         print(f"Arguments: {args}")
-        args=self.clean_args(args)
+        args = self.clean_args(args)
         if len(args) > 0:
             try:
                 # Check if the data is already JSON or a list of coordinates
@@ -181,43 +200,156 @@ class AeroMixApp:
         elif gesture == "play":
             self.sound_controller.control_playback("play", "data/audio/demo.mp3")
     
+    def start_webcam(self):
+        """Start the webcam capture"""
+        # Try different camera indices if the default doesn't work
+        for camera_index in range(5):  # Try indices 0-4
+            print(f"Trying to open camera at index {camera_index}")
+            self.webcam = cv2.VideoCapture(camera_index, cv2.CAP_DSHOW)
+            if self.webcam.isOpened():
+                print(f"Successfully opened camera at index {camera_index}")
+                # Set resolution
+                self.webcam.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+                self.webcam.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+                return True
+        
+        print("Error: Could not open any camera")
+        return False
+    
+    def stop_webcam(self):
+        """Stop the webcam capture"""
+        if hasattr(self, 'gesture_detector'):
+            self.gesture_detector.release()
+            
+        if self.webcam is not None and self.webcam.isOpened():
+            self.webcam.release()
+            cv2.destroyAllWindows()
+            print("Webcam stopped")
+
+    
     def start_training(self, address, *args):
         """Start training mode for a gesture"""
+        args = self.clean_args(args)
+        if hasattr(self, 'gesture_detector'):
+            self.gesture_detector.reinitialize()
         if len(args) > 0:
             gesture_name = args[0]
             self.trainer.start_training(gesture_name)
             self.training_mode = True
-            print(f"Started training for gesture: {gesture_name}")
+            
+            # Start the webcam for training
+            if self.start_webcam():
+                print(f"Started training for gesture: {gesture_name}")
+                print("Webcam activated for training. Press 'q' to stop training.")
+                
+                # Open a window to show the webcam feed
+                while self.training_mode and self.webcam.isOpened():
+                    ret, frame = self.webcam.read()
+                    if not ret:
+                        print("Failed to grab frame from webcam")
+                        break
+                    
+                    # Detect hand landmarks
+                    landmarks, annotated_frame = self.gesture_detector.detect_landmarks(frame)
+                    
+                    # Display the annotated frame
+                    cv2.putText(annotated_frame, "TRAINING MODE", (20, 30),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+                    cv2.putText(annotated_frame, f"Gesture: {self.trainer.current_gesture}", (20, 60),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+                    cv2.putText(annotated_frame, "Press 'q' to stop training", (20, frame.shape[0] - 20),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
+                    
+                    # Show sample count
+                    if hasattr(self.trainer, 'training_data'):
+                        sample_count = len(self.trainer.training_data)
+                        cv2.putText(annotated_frame, f"Samples: {sample_count}", (20, 90),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+                    
+                    cv2.imshow('Training Mode - Press q to stop', annotated_frame)
+                    
+                    # Break the loop if 'q' is pressed
+                    if cv2.waitKey(1) & 0xFF == ord('q'):
+                        self.stop_training(address)
+                        break
+            else:
+                print("Could not start webcam for training")
     
     def record_training_sample(self, address, *args):
         """Record a training sample"""
         args = self.clean_args(args)
         if len(args) > 1:
             try:
-                # Check if first arg is JSON string or list
-                if isinstance(args[0], str):
-                    try:
-                        landmarks = json.loads(args[0])
-                    except json.JSONDecodeError:
-                        print(f"Error: Invalid JSON in training sample")
-                        return
-                else:
-                    landmarks = self.reconstruct_landmarks_from_list(args[:-1])
+                # Get the latest landmarks from the gesture detector
+                if self.webcam is not None and self.webcam.isOpened():
+                    ret, frame = self.webcam.read()
+                    if ret:
+                        landmarks, annotated_frame = self.gesture_detector.detect_landmarks(frame)
+                        
+                        # Last argument is the is_gesture flag
+                        is_gesture = bool(int(args[-1]))  # 1 for green light, 0 for yellow light
+                        
+                        # Add to training data
+                        self.trainer.add_sample(landmarks, is_gesture)
+                        
+                        # Create a copy of the frame for drawing
+                        display_frame = annotated_frame.copy()
+                        
+                        # Draw a colored border based on is_gesture
+                        color = (0, 255, 0) if is_gesture else (0, 255, 255)  # Green or Yellow
+                        cv2.rectangle(display_frame, (0, 0), (frame.shape[1], frame.shape[0]), color, 10)
+                        
+                        # Add a "Recording" indicator
+                        cv2.putText(display_frame, "SAMPLE RECORDED!", (20, 50),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 1, color, 2)
+                        
+                        # Show sample count
+                        sample_count = len(self.trainer.training_data)
+                        cv2.putText(display_frame, f"Samples: {sample_count}", (20, 90),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+                        
+                        # Show the frame with visual feedback
+                        cv2.imshow('Training Mode - Press q to stop', display_frame)
+                        
+                        # Flash effect - show for a moment then return to normal
+                        cv2.waitKey(200)  # Show the recording indicator for 200ms
                 
-                # Last argument is the is_gesture flag
-                is_gesture = bool(int(args[-1]))  # 1 for green light, 0 for yellow light
-                
-                # Add to training data
-                self.trainer.add_sample(landmarks, is_gesture)
             except Exception as e:
                 print(f"Error recording training sample: {e}")
-    
+
+
+    def show_webcam_frame(self):
+        """Show the current webcam frame with instructions"""
+        if self.webcam is not None and self.webcam.isOpened():
+            ret, frame = self.webcam.read()
+            if ret:
+                # Add instructions and status
+                cv2.putText(frame, "TRAINING MODE", (20, 30), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+                cv2.putText(frame, f"Gesture: {self.trainer.current_gesture}", (20, 60), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+                cv2.putText(frame, "Press 'q' to stop training", (20, frame.shape[0] - 20), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
+                
+                # Show sample count
+                if hasattr(self.trainer, 'training_data'):
+                    sample_count = len(self.trainer.training_data)
+                    cv2.putText(frame, f"Samples: {sample_count}", (20, 90), 
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+                
+                cv2.imshow('Training Mode - Press q to stop', frame)
+                cv2.waitKey(1)
+
+
     def stop_training(self, address, *args):
-        """Stop training and save the model"""
+        if hasattr(self, 'gesture_detector'):
+            self.gesture_detector.hands.close()
+        self.stop_webcam()
+        
         if self.trainer.stop_training():
             # Reload the models
             self.load_gesture_models(self.trainer.save_dir)
-            
+        
         self.training_mode = False
         print("Training stopped")
     
@@ -234,6 +366,7 @@ class AeroMixApp:
             print("Shutting down AEROMIX...")
         finally:
             # Clean up
+            self.stop_webcam()
             self.osc_handler.stop_server()
 
 def main():
