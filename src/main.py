@@ -3,6 +3,7 @@ import time
 import json
 import argparse
 import os
+import numpy as np
 
 from utils.osc_handler import OSCHandler
 from ml.classifier import GestureClassifier
@@ -25,6 +26,10 @@ class AeroMixApp:
         self.gesture_detector = GestureDetector()
         self._detector_released = False
         self.setup_osc_handlers()
+
+        # --- PLAY AUDIO ON STARTUP (only in recognition mode) ---
+        if not self.training_mode:
+            self.sound_controller.control_playback("play", "data/audio/sample1.mp3")
 
     def load_gesture_models(self, model_dir):
         print(f"Loading gesture models from {model_dir}")
@@ -157,7 +162,7 @@ class AeroMixApp:
         elif gesture == "bass_down":
             self.sound_controller.adjust_bass(-0.1)
         elif gesture == "play":
-            self.sound_controller.control_playback("play", "data/audio/demo.mp3")
+            self.sound_controller.control_playback("play", "data/audio/sample1.mp3")
 
     def start_webcam(self):
         for camera_index in range(5):
@@ -170,7 +175,6 @@ class AeroMixApp:
                 return True
         print("Error: Could not open any camera")
         return False
-
 
     def stop_webcam(self):
         print("Stopping webcam...")
@@ -288,31 +292,80 @@ class AeroMixApp:
     def run_recognition(self):
         print("Starting real-time gesture recognition...")
         print(f"Available gesture models: {list(self.gestures.keys())}")
+        label_map = {
+            "volume_up": "Volume Up",
+            "volume_down": "Volume Down",
+            "bass_up": "Bass Up",
+            "bass_down": "Bass Down",
+            "tempo_up": "Tempo Up",
+            "tempo_down": "Tempo Down",
+            "pitch_up": "Pitch Up",
+            "pitch_down": "Pitch Down",
+            "play": "Play"
+        }
         if not self.start_webcam():
             print("Could not open webcam for recognition.")
             return
+        last_label = ""
+        label_timer = 0
         while True:
             ret, frame = self.webcam.read()
             if not ret:
                 break
             frame = cv2.flip(frame, 1)
             landmarks, annotated_frame = self.gesture_detector.detect_landmarks(frame)
+            recognized_label = ""
             if landmarks and (landmarks["left_hand"] or landmarks["right_hand"]):
                 for gesture_name, classifier in self.gestures.items():
                     features = classifier.preprocess_landmarks(landmarks)
-                    print(f"[DEBUG] Features for {gesture_name}: {features}")
                     if features.size > 0:
                         pred = classifier.predict(features)
-                        print(f"[DEBUG] Predicted: {pred}, Target: {gesture_name}")
                         if pred == gesture_name:
-                            print(f"Recognized gesture: {gesture_name}")
                             self.process_gesture(gesture_name)
-                            cv2.putText(annotated_frame, f"Gesture: {gesture_name}", (20, 60),
-                                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0,255,0), 2)
+                            recognized_label = label_map.get(gesture_name, gesture_name)
+                            last_label = recognized_label
+                            label_timer = 15  # Show label for 15 frames
+            # Draw the last recognized label for a short time
+            if label_timer > 0 and last_label:
+                cv2.putText(
+                    annotated_frame, f"{last_label}", (20, 60),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 255, 0), 3
+                )
+                label_timer -= 1
+
+            # Draw a volume bar
+            bar_top = 150
+            bar_bottom = 400
+            bar_left = 50
+            bar_right = 85
+            vol_bar = int(np.interp(self.sound_controller.volume, [0.0, 1.0], [bar_bottom, bar_top]))
+            cv2.rectangle(annotated_frame, (bar_left, bar_top), (bar_right, bar_bottom), (0, 0, 0), 3)
+            cv2.rectangle(annotated_frame, (bar_left, vol_bar), (bar_right, bar_bottom), (0, 255, 0), cv2.FILLED)
+            cv2.putText(
+                annotated_frame,
+                f'Volume: {int(self.sound_controller.volume*100)}%',
+                (40, 430),
+                cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2
+            )
+
+            # Draw a bass bar next to volume bar
+            bass_bar_left = 100
+            bass_bar_right = 135
+            bass_bar = int(np.interp(self.sound_controller.bass, [0.0, 1.0], [bar_bottom, bar_top]))
+            cv2.rectangle(annotated_frame, (bass_bar_left, bar_top), (bass_bar_right, bar_bottom), (0, 0, 0), 3)
+            cv2.rectangle(annotated_frame, (bass_bar_left, bass_bar), (bass_bar_right, bar_bottom), (255, 0, 0), cv2.FILLED)
+            cv2.putText(
+                annotated_frame,
+                f'Bass: {int(self.sound_controller.bass*100)}%',
+                (90, 430),
+                cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2
+            )
+
             cv2.imshow("Recognition Mode", annotated_frame)
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 break
         self.stop_webcam()
+
 
     def stop_training(self, address, *args):
         print("Stopping training...")

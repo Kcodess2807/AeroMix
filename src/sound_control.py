@@ -57,20 +57,31 @@ class SoundController:
         return self.effects.get(effect_name, 0.0)
 
     def control_playback(self, command, track_path=None):
+        # Default to your custom audio file if none specified
+        if track_path is None:
+            track_path = "data/audio/sample1.mp3"
         print(f"SoundController: Playback command {command}, track: {track_path}")
-        if command == "play" and track_path:
-            pygame.mixer.music.load(track_path)
-            pygame.mixer.music.play()
-            self.current_track = track_path
-            self.is_playing = True
+        if command == "play":
+            try:
+                pygame.mixer.music.load(track_path)
+                pygame.mixer.music.set_volume(self.volume)
+                pygame.mixer.music.play()
+                self.current_track = track_path
+                self.is_playing = True
+                print("SoundController: Playing audio.")
+            except Exception as e:
+                print(f"SoundController: Failed to play audio: {e}")
         elif command == "pause":
             pygame.mixer.music.pause()
             self.is_playing = False
+            print("SoundController: Paused audio.")
         elif command == "resume":
             pygame.mixer.music.unpause()
             self.is_playing = True
+            print("SoundController: Resumed audio.")
         elif command == "stop":
             pygame.mixer.music.stop()
             self.is_playing = False
+            print("SoundController: Stopped audio.")
         if self.osc_handler:
             self.osc_handler.send_message("/playback", command)
