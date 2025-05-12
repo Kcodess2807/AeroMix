@@ -162,7 +162,7 @@ class AeroMixApp:
     def start_webcam(self):
         for camera_index in range(5):
             print(f"Trying to open camera at index {camera_index}")
-            self.webcam = cv2.VideoCapture(camera_index, cv2.CAP_DSHOW)
+            self.webcam = cv2.VideoCapture(camera_index)
             if self.webcam.isOpened():
                 print(f"Successfully opened camera at index {camera_index}")
                 self.webcam.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
@@ -170,6 +170,7 @@ class AeroMixApp:
                 return True
         print("Error: Could not open any camera")
         return False
+
 
     def stop_webcam(self):
         print("Stopping webcam...")
