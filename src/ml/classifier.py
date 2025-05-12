@@ -22,18 +22,30 @@ class GestureClassifier:
 
     def preprocess_landmarks(self, landmarks):
         features = []
-        # Extract pose landmarks if available (using only x, y)
-        if 'pose' in landmarks:
-            for lm in landmarks['pose']:
+        # Pose: 33 landmarks
+        for i in range(33):
+            if 'pose' in landmarks and len(landmarks['pose']) > i:
+                lm = landmarks['pose'][i]
                 features.extend([lm['x'], lm['y']])
-        # Extract hand landmarks if available
-        for hand in ['left_hand', 'right_hand']:
-            if hand in landmarks:
-                for lm in landmarks[hand]:
-                    features.extend([lm['x'], lm['y']])
-        features = np.array(features).reshape(1, -1)
-        print(f"[Classifier] Preprocessed features: {features.shape} {features}")
-        return features
+            else:
+                features.extend([0.0, 0.0])
+        # Left hand: 21 landmarks
+        for i in range(21):
+            if 'left_hand' in landmarks and len(landmarks['left_hand']) > i:
+                lm = landmarks['left_hand'][i]
+                features.extend([lm['x'], lm['y']])
+            else:
+                features.extend([0.0, 0.0])
+        # Right hand: 21 landmarks
+        for i in range(21):
+            if 'right_hand' in landmarks and len(landmarks['right_hand']) > i:
+                lm = landmarks['right_hand'][i]
+                features.extend([lm['x'], lm['y']])
+            else:
+                features.extend([0.0, 0.0])
+        return np.array(features).reshape(1, -1)
+
+
 
     def train(self, X, y):
         print(f"[Classifier] Training on {X.shape} samples, labels: {np.unique(y)}")
@@ -44,18 +56,26 @@ class GestureClassifier:
         if self.model is None or self.scaler is None:
             print("[Classifier] Model or scaler not loaded.")
             return "NO_GESTURE"
+        
         features = self.preprocess_landmarks(landmarks)
-        if features.size == 0 or features.shape[1] == 0:
-            print("[Classifier] Empty features, returning NO_GESTURE.")
+        if features.size == 0:
             return "NO_GESTURE"
-        try:
-            features_scaled = self.scaler.transform(features)
-        except Exception as e:
-            print(f"[Classifier] Scaler transform failed: {e}")
+            
+        features_scaled = self.scaler.transform(features)
+        
+        # Get probabilities instead of just class prediction
+        probas = self.model.predict_proba(features_scaled)[0]
+        max_proba = probas.max()
+        
+        # Only predict if confidence is high enough
+        if max_proba > 0.7:  # Adjust threshold as needed
+            pred = self.model.classes_[probas.argmax()]
+            print(f"[Classifier] Prediction: {pred} with confidence {max_proba:.2f}")
+            return pred
+        else:
+            print(f"[Classifier] Low confidence: {max_proba:.2f}, returning NO_GESTURE")
             return "NO_GESTURE"
-        pred = self.model.predict(features_scaled)[0]
-        print(f"[Classifier] Model prediction: {pred}")
-        return pred
+
 
     def save_model(self, model_path):
         if self.model is None or self.scaler is None:

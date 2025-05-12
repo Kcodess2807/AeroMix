@@ -1,6 +1,5 @@
 import numpy as np
 import os
-import pickle
 from .classifier import GestureClassifier
 
 class GestureTrainer:
@@ -34,7 +33,7 @@ class GestureTrainer:
         features = self.classifier.preprocess_landmarks(landmarks)
         print(f"Extracted features: {features}")
 
-        # Skip if features are empty
+        # Skip if features are empty or malformed
         if features.size == 0 or (features.ndim > 1 and features.shape[1] == 0):
             print("Warning: Empty features detected, sample skipped")
             return
@@ -43,7 +42,6 @@ class GestureTrainer:
         self.training_data.append(features.flatten())
         label = self.current_gesture if is_gesture else "OTHER"
         self.training_labels.append(label)
-
         print(f"Sample added. Current training data length: {len(self.training_data)}")
 
     def train_model(self):
@@ -55,7 +53,7 @@ class GestureTrainer:
         # Convert to numpy arrays
         X = np.array(self.training_data)
         y = np.array(self.training_labels)
-        print(f"Training model with {len(X)} samples...")
+        print(f"Training model with {len(X)} samples. Labels: {np.unique(y)}")
 
         # Train the classifier
         self.classifier.train(X, y)
