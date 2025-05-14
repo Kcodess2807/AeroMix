@@ -4,6 +4,7 @@ import json
 import argparse
 import os
 import numpy as np
+import threading
 
 from utils.osc_handler import OSCHandler
 from ml.classifier import GestureClassifier
@@ -204,6 +205,15 @@ class AeroMixApp:
             if self.start_webcam():
                 print(f"Started training for gesture: {gesture_name}")
                 print("Webcam activated for training. Press 'q' to stop training.")
+
+                # --- AUTOMATIC SAMPLE RECORDING EVERY 300ms ---
+                def auto_record():
+                    while self.training_mode and self.webcam.isOpened():
+                        self.record_training_sample(address, 1)
+                        time.sleep(0.3)  # Adjust interval as needed
+
+                threading.Thread(target=auto_record, daemon=True).start()
+
                 while self.training_mode and self.webcam.isOpened():
                     ret, frame = self.webcam.read()
                     if ret:
@@ -242,7 +252,7 @@ class AeroMixApp:
         if not self.training_mode or not self.webcam or not self.webcam.isOpened() or self._detector_released:
             print("Training not active or webcam not open, skipping sample.")
             return
-        if len(args) > 1:
+        if len(args) > 0:  # Now works for both manual and auto-record
             try:
                 ret, frame = self.webcam.read()
                 if ret:
@@ -306,8 +316,13 @@ class AeroMixApp:
         if not self.start_webcam():
             print("Could not open webcam for recognition.")
             return
+
+        last_pred = None
+        pred_count = 0
+        PRED_THRESHOLD = 3  # Lowered for more responsive switching
         last_label = ""
         label_timer = 0
+
         while True:
             ret, frame = self.webcam.read()
             if not ret:
@@ -315,16 +330,31 @@ class AeroMixApp:
             frame = cv2.flip(frame, 1)
             landmarks, annotated_frame = self.gesture_detector.detect_landmarks(frame)
             recognized_label = ""
+            pred_this_frame = None
+
             if landmarks and (landmarks["left_hand"] or landmarks["right_hand"]):
                 for gesture_name, classifier in self.gestures.items():
                     features = classifier.preprocess_landmarks(landmarks)
                     if features.size > 0:
                         pred = classifier.predict(features)
                         if pred == gesture_name:
-                            self.process_gesture(gesture_name)
-                            recognized_label = label_map.get(gesture_name, gesture_name)
-                            last_label = recognized_label
-                            label_timer = 15  # Show label for 15 frames
+                            pred_this_frame = pred
+                            break  # Only process the first matching gesture
+
+                # Debouncing logic
+                if pred_this_frame == last_pred and pred_this_frame is not None:
+                    pred_count += 1
+                else:
+                    last_pred = pred_this_frame
+                    pred_count = 1
+
+                if pred_count == PRED_THRESHOLD and last_pred is not None:
+                    self.process_gesture(last_pred)
+                    recognized_label = label_map.get(last_pred, last_pred)
+                    last_label = recognized_label
+                    label_timer = 15  # Show label for 15 frames
+                    pred_count = 0  # Reset so it doesn't trigger every frame
+
             # Draw the last recognized label for a short time
             if label_timer > 0 and last_label:
                 cv2.putText(
@@ -365,7 +395,6 @@ class AeroMixApp:
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 break
         self.stop_webcam()
-
 
     def stop_training(self, address, *args):
         print("Stopping training...")
