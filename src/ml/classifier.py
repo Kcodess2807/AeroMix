@@ -3,6 +3,8 @@ import pickle
 from sklearn.preprocessing import StandardScaler
 from sklearn.ensemble import RandomForestClassifier
 import os
+import math
+from sklearn.neural_network import MLPClassifier
 
 class GestureClassifier:
     def __init__(self, model_path=None):
@@ -67,61 +69,139 @@ class GestureClassifier:
         
         features = []
         
-        # 1. Normalized coordinates for all landmarks
+        # 1. Normalized coordinates for all landmarks (baseline features)
         for lm in hand_landmarks:
             norm_x = (lm["x"] - x_min) / x_range
             norm_y = (lm["y"] - y_min) / y_range
             features.extend([norm_x, norm_y])
         
-        # 2. Thumb direction (crucial for thumbs up/down)
-        thumb_direction = (thumb_tip["y"] - wrist["y"]) / y_range
-        features.append(thumb_direction)
+        # 2. ENHANCED: Thumb direction relative to palm (crucial for thumbs up/down)
+        # Calculate palm center as average of MCP joints
+        palm_center_x = sum(hand_landmarks[i]["x"] for i in [0, 5, 9, 13, 17]) / 5
+        palm_center_y = sum(hand_landmarks[i]["y"] for i in [0, 5, 9, 13, 17]) / 5
+        
+        # Thumb direction vector (from palm center to thumb tip)
+        thumb_dir_x = thumb_tip["x"] - palm_center_x
+        thumb_dir_y = thumb_tip["y"] - palm_center_y
+        
+        # Normalize the direction
+        thumb_dir_length = max(0.001, math.sqrt(thumb_dir_x**2 + thumb_dir_y**2))
+        thumb_dir_x /= thumb_dir_length
+        thumb_dir_y /= thumb_dir_length
+        
+        # Add thumb direction features (critical for up vs down)
+        features.extend([thumb_dir_x, thumb_dir_y])
+        
+        # Explicit vertical direction of thumb (positive for down, negative for up)
+        thumb_vertical_dir = (thumb_tip["y"] - wrist["y"]) / y_range
+        features.append(thumb_vertical_dir)
         
         # 3. Finger extensions (distance from wrist to fingertips)
         for tip in [thumb_tip, index_tip, middle_tip, ring_tip, pinky_tip]:
             dx = tip["x"] - wrist["x"]
             dy = tip["y"] - wrist["y"]
-            distance = np.sqrt(dx**2 + dy**2)
+            distance = np.sqrt(dx**2 + dy**2) / max(x_range, y_range)  # Normalize by hand size
             features.append(distance)
         
-        # 4. Finger curling (for fist detection)
-        for mcp, pip, dip, tip in [
-            (index_mcp, index_pip, index_dip, index_tip),
-            (middle_mcp, middle_pip, middle_dip, middle_tip),
-            (ring_mcp, ring_pip, ring_dip, ring_tip),
-            (pinky_mcp, pinky_pip, pinky_dip, pinky_tip)
+        # 4. ENHANCED: Finger curling (for fist detection)
+        for finger_name, (mcp, pip, dip, tip) in [
+            ("thumb", (thumb_mcp, thumb_ip, thumb_tip, thumb_tip)),  # Thumb has one less joint
+            ("index", (index_mcp, index_pip, index_dip, index_tip)),
+            ("middle", (middle_mcp, middle_pip, middle_dip, middle_tip)),
+            ("ring", (ring_mcp, ring_pip, ring_dip, ring_tip)),
+            ("pinky", (pinky_mcp, pinky_pip, pinky_dip, pinky_tip))
         ]:
-            # Calculate angle between segments
-            v1x = pip["x"] - mcp["x"]
-            v1y = pip["y"] - mcp["y"]
-            v2x = dip["x"] - pip["x"]
-            v2y = dip["y"] - pip["y"]
-            v3x = tip["x"] - dip["x"]
-            v3y = tip["y"] - dip["y"]
-            
-            # Dot products to estimate finger curling
-            dot1 = v1x * v2x + v1y * v2y
-            dot2 = v2x * v3x + v2y * v3y
-            features.extend([dot1, dot2])
+            # Calculate vectors for each segment
+            if finger_name == "thumb":
+                v1x = pip["x"] - mcp["x"]
+                v1y = pip["y"] - mcp["y"]
+                v2x = tip["x"] - pip["x"]
+                v2y = tip["y"] - pip["y"]
+                
+                # Normalize vectors
+                v1_len = max(0.001, math.sqrt(v1x**2 + v1y**2))
+                v2_len = max(0.001, math.sqrt(v2x**2 + v2y**2))
+                v1x, v1y = v1x/v1_len, v1y/v1_len
+                v2x, v2y = v2x/v2_len, v2y/v2_len
+                
+                # Dot product (cosine of angle)
+                dot = v1x*v2x + v1y*v2y
+                features.append(dot)
+            else:
+                v1x = pip["x"] - mcp["x"]
+                v1y = pip["y"] - mcp["y"]
+                v2x = dip["x"] - pip["x"]
+                v2y = dip["y"] - pip["y"]
+                v3x = tip["x"] - dip["x"]
+                v3y = tip["y"] - dip["y"]
+                
+                # Normalize vectors
+                v1_len = max(0.001, math.sqrt(v1x**2 + v1y**2))
+                v2_len = max(0.001, math.sqrt(v2x**2 + v2y**2))
+                v3_len = max(0.001, math.sqrt(v3x**2 + v3y**2))
+                v1x, v1y = v1x/v1_len, v1y/v1_len
+                v2x, v2y = v2x/v2_len, v2y/v2_len
+                v3x, v3y = v3x/v3_len, v3y/v3_len
+                
+                # Dot products (cosine of angles)
+                dot1 = v1x*v2x + v1y*v2y
+                dot2 = v2x*v3x + v2y*v3y
+                
+                # Finger curl metric (higher value = more curled)
+                curl_metric = 2.0 - (dot1 + dot2)
+                features.append(curl_metric)
         
-        # 5. Hand openness (for fist vs. open hand)
+        # 5. ENHANCED: Hand shape features
+        # Hand area (for fist vs. open hand)
         hand_area = x_range * y_range
         features.append(hand_area)
         
-        # 6. Finger-to-finger distances (for yo-yo sign)
+        # Convex hull area approximation
+        hull_area = (x_max - x_min) * (y_max - y_min)
+        features.append(hull_area)
+        
+        # 6. ENHANCED: Finger-to-finger distances (for yo-yo sign)
         finger_tips = [thumb_tip, index_tip, middle_tip, ring_tip, pinky_tip]
         for i in range(len(finger_tips)):
             for j in range(i+1, len(finger_tips)):
                 dx = finger_tips[i]["x"] - finger_tips[j]["x"]
                 dy = finger_tips[i]["y"] - finger_tips[j]["y"]
-                distance = np.sqrt(dx**2 + dy**2)
+                distance = np.sqrt(dx**2 + dy**2) / max(x_range, y_range)  # Normalize
                 features.append(distance)
         
-        # 7. Thumb position relative to other fingers (for thumbs up/down)
+        # 7. ENHANCED: Thumb position relative to other fingers (for thumbs up/down)
         for finger_tip in [index_tip, middle_tip, ring_tip, pinky_tip]:
-            dx = thumb_tip["x"] - finger_tip["x"]
-            dy = thumb_tip["y"] - finger_tip["y"]
+            dx = (thumb_tip["x"] - finger_tip["x"]) / x_range
+            dy = (thumb_tip["y"] - finger_tip["y"]) / y_range
             features.extend([dx, dy])
+            
+            # Distance from thumb to each finger tip (normalized)
+            distance = np.sqrt(dx**2 + dy**2)
+            features.append(distance)
+        
+        # 8. NEW: Three-finger yo-yo sign specific features
+        # Check if middle, ring, and pinky are extended while index is curled
+        middle_extended = (middle_tip["y"] - middle_mcp["y"]) / y_range
+        ring_extended = (ring_tip["y"] - ring_mcp["y"]) / y_range
+        pinky_extended = (pinky_tip["y"] - pinky_mcp["y"]) / y_range
+        index_curled = (index_tip["y"] - index_mcp["y"]) / y_range
+        
+        # Add these as explicit features
+        features.extend([middle_extended, ring_extended, pinky_extended, index_curled])
+        
+        # 9. NEW: Closed fist specific features
+        # For a fist, all fingertips should be close to the palm
+        fingertips_to_palm_distances = []
+        for tip in [thumb_tip, index_tip, middle_tip, ring_tip, pinky_tip]:
+            dx = tip["x"] - palm_center_x
+            dy = tip["y"] - palm_center_y
+            dist = np.sqrt(dx**2 + dy**2) / max(x_range, y_range)
+            fingertips_to_palm_distances.append(dist)
+        
+        # Average distance and max distance are good indicators for a fist
+        avg_dist_to_palm = sum(fingertips_to_palm_distances) / len(fingertips_to_palm_distances)
+        max_dist_to_palm = max(fingertips_to_palm_distances)
+        features.extend([avg_dist_to_palm, max_dist_to_palm])
         
         return np.array(features).reshape(1, -1)
 
@@ -137,14 +217,23 @@ class GestureClassifier:
         self.scaler = StandardScaler()
         X_scaled = self.scaler.fit_transform(X)
         
-        # Train a Random Forest classifier (more robust than SVM for this task)
-        self.model = RandomForestClassifier(
-            n_estimators=100,
-            max_depth=20,
-            min_samples_split=5,
+        # Train a Random Forest classifier with improved parameters
+        self.model=MLPClassifier(
+            hidden_layer_sizes=(100, 50), 
+            activation='relu', 
+            solver='adam', 
+            max_iter=500, 
             random_state=42
         )
         self.model.fit(X_scaled, y)
+        
+        # Print feature importances
+        if hasattr(self.model, 'feature_importances_'):
+            importances = self.model.feature_importances_
+            top_indices = np.argsort(importances)[-10:]  # Top 10 features
+            print("[Classifier] Top feature importances:")
+            for i in top_indices:
+                print(f"Feature {i}: {importances[i]:.4f}")
         
         print(f"[Classifier] Training complete. Model accuracy: {self.model.score(X_scaled, y):.4f}")
         return True
@@ -166,7 +255,7 @@ class GestureClassifier:
         max_proba = probas.max()
         
         # Only predict if confidence is high enough
-        if max_proba > 0.7:  # Threshold for confidence
+        if max_proba > 0.65:  # Slightly lower threshold for better responsiveness
             pred = self.model.classes_[probas.argmax()]
             print(f"[Classifier] Prediction: {pred} with confidence {max_proba:.2f}")
             return pred

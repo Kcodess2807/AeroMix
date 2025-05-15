@@ -317,11 +317,14 @@ class AeroMixApp:
             print("Could not open webcam for recognition.")
             return
 
-        last_pred = None
-        pred_count = 0
-        PRED_THRESHOLD = 3  # Lowered for more responsive switching
+        # Enhanced gesture recognition with observation window
+        pred_history = []
+        HISTORY_SIZE = 5
+        PRED_THRESHOLD = 3  # Minimum consecutive frames for a gesture
         last_label = ""
         label_timer = 0
+        last_gesture_time = 0
+        GESTURE_COOLDOWN = 0.5  # Seconds to wait before detecting same gesture again
 
         while True:
             ret, frame = self.webcam.read()
@@ -331,8 +334,10 @@ class AeroMixApp:
             landmarks, annotated_frame = self.gesture_detector.detect_landmarks(frame)
             recognized_label = ""
             pred_this_frame = None
+            current_time = time.time()
 
             if landmarks and (landmarks["left_hand"] or landmarks["right_hand"]):
+                # Try to detect a gesture
                 for gesture_name, classifier in self.gestures.items():
                     features = classifier.preprocess_landmarks(landmarks)
                     if features.size > 0:
@@ -340,20 +345,39 @@ class AeroMixApp:
                         if pred == gesture_name:
                             pred_this_frame = pred
                             break  # Only process the first matching gesture
-
-                # Debouncing logic
-                if pred_this_frame == last_pred and pred_this_frame is not None:
-                    pred_count += 1
-                else:
-                    last_pred = pred_this_frame
-                    pred_count = 1
-
-                if pred_count == PRED_THRESHOLD and last_pred is not None:
-                    self.process_gesture(last_pred)
-                    recognized_label = label_map.get(last_pred, last_pred)
-                    last_label = recognized_label
-                    label_timer = 15  # Show label for 15 frames
-                    pred_count = 0  # Reset so it doesn't trigger every frame
+                
+                # Add to history
+                if pred_this_frame is not None:
+                    pred_history.append(pred_this_frame)
+                    if len(pred_history) > HISTORY_SIZE:
+                        pred_history.pop(0)
+                    
+                    # Check if we have enough consistent predictions
+                    if len(pred_history) >= PRED_THRESHOLD:
+                        # Count occurrences of each gesture in the history
+                        gesture_counts = {}
+                        for gesture in pred_history:
+                            if gesture in gesture_counts:
+                                gesture_counts[gesture] += 1
+                            else:
+                                gesture_counts[gesture] = 1
+                        
+                        # Find the most common gesture
+                        most_common = max(gesture_counts, key=gesture_counts.get, default=None)
+                        
+                        # Only trigger if the gesture appears consistently and cooldown has passed
+                        if (most_common is not None and 
+                            gesture_counts[most_common] >= PRED_THRESHOLD and
+                            current_time - last_gesture_time > GESTURE_COOLDOWN):
+                            
+                            self.process_gesture(most_common)
+                            recognized_label = label_map.get(most_common, most_common)
+                            last_label = recognized_label
+                            label_timer = 15  # Show label for 15 frames
+                            last_gesture_time = current_time
+                            
+                            # Clear history after triggering to avoid rapid repeats
+                            pred_history = []
 
             # Draw the last recognized label for a short time
             if label_timer > 0 and last_label:
@@ -391,10 +415,25 @@ class AeroMixApp:
                 cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2
             )
 
+            # Draw confidence meter (optional)
+            if pred_history:
+                most_common = max(set(pred_history), key=pred_history.count)
+                confidence = pred_history.count(most_common) / len(pred_history)
+                conf_width = int(100 * confidence)
+                cv2.rectangle(annotated_frame, (500, 50), (500 + conf_width, 70), (0, 255, 255), cv2.FILLED)
+                cv2.rectangle(annotated_frame, (500, 50), (600, 70), (0, 0, 0), 2)
+                cv2.putText(
+                    annotated_frame,
+                    f'Confidence',
+                    (500, 40),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1
+                )
+
             cv2.imshow("Recognition Mode", annotated_frame)
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 break
         self.stop_webcam()
+
 
     def stop_training(self, address, *args):
         print("Stopping training...")
