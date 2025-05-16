@@ -345,53 +345,65 @@ class AeroMixApp:
                 )
                 label_timer -= 1
 
-            # Draw a volume bar
+            # --- Improved Visualizer Layout ---
+
             bar_top = 150
             bar_bottom = 400
-            bar_left = 50
-            bar_right = 85
+            bar_width = 35
+            bar_gap = 60  # Increased gap for clarity
+
+            # Volume bar
+            vol_left = 50
+            vol_right = vol_left + bar_width
             vol_bar = int(np.interp(self.sound_controller.volume, [0.0, 1.0], [bar_bottom, bar_top]))
-            cv2.rectangle(annotated_frame, (bar_left, bar_top), (bar_right, bar_bottom), (0, 0, 0), 3)
-            cv2.rectangle(annotated_frame, (bar_left, vol_bar), (bar_right, bar_bottom), (0, 255, 0), cv2.FILLED)
+            cv2.rectangle(annotated_frame, (vol_left, bar_top-10), (vol_right, bar_bottom+10), (30, 30, 30), -1)  # background
+            cv2.rectangle(annotated_frame, (vol_left, bar_top), (vol_right, bar_bottom), (0, 0, 0), 2)
+            cv2.rectangle(annotated_frame, (vol_left, vol_bar), (vol_right, bar_bottom), (0, 255, 0), cv2.FILLED)
+            cv2.putText(annotated_frame, "Volume", (vol_left-5, bar_top-20), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,255,0), 2)
             cv2.putText(
                 annotated_frame,
-                f'Volume: {int(self.sound_controller.volume*100)}%',
-                (40, 430),
-                cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2
+                f'{int(self.sound_controller.volume*100)}%',
+                (vol_left-5, bar_bottom+35),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,255,0), 2
             )
 
-            # Draw a bass bar
-            bass_bar_left = 100
-            bass_bar_right = 135
+            # Bass bar
+            bass_left = vol_right + bar_gap
+            bass_right = bass_left + bar_width
             bass_bar = int(np.interp(self.sound_controller.bass, [0.0, 1.0], [bar_bottom, bar_top]))
-            cv2.rectangle(annotated_frame, (bass_bar_left, bar_top), (bass_bar_right, bar_bottom), (0, 0, 0), 3)
-            cv2.rectangle(annotated_frame, (bass_bar_left, bass_bar), (bass_bar_right, bar_bottom), (255, 0, 0), cv2.FILLED)
+            cv2.rectangle(annotated_frame, (bass_left, bar_top-10), (bass_right, bar_bottom+10), (30, 30, 30), -1)
+            cv2.rectangle(annotated_frame, (bass_left, bar_top), (bass_right, bar_bottom), (0, 0, 0), 2)
+            cv2.rectangle(annotated_frame, (bass_left, bass_bar), (bass_right, bar_bottom), (255, 0, 0), cv2.FILLED)
+            cv2.putText(annotated_frame, "Bass", (bass_left-2, bar_top-20), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255,0,0), 2)
             cv2.putText(
                 annotated_frame,
-                f'Bass: {int(self.sound_controller.bass*100)}%',
-                (90, 430),
-                cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2
+                f'{int(self.sound_controller.bass*100)}%',
+                (bass_left-2, bar_bottom+35),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255,0,0), 2
             )
 
-            # Draw a tempo bar
-            tempo_bar_left = 150
-            tempo_bar_right = 185
+            # Tempo bar
+            tempo_left = bass_right + bar_gap
+            tempo_right = tempo_left + bar_width
             tempo_min = 60
             tempo_max = 200
             tempo_bar = int(np.interp(self.sound_controller.tempo, [tempo_min, tempo_max], [bar_bottom, bar_top]))
-            cv2.rectangle(annotated_frame, (tempo_bar_left, bar_top), (tempo_bar_right, bar_bottom), (0, 0, 0), 3)
-            cv2.rectangle(annotated_frame, (tempo_bar_left, tempo_bar), (tempo_bar_right, bar_bottom), (0, 165, 255), cv2.FILLED)
+            cv2.rectangle(annotated_frame, (tempo_left, bar_top-10), (tempo_right, bar_bottom+10), (30, 30, 30), -1)
+            cv2.rectangle(annotated_frame, (tempo_left, bar_top), (tempo_right, bar_bottom), (0, 0, 0), 2)
+            cv2.rectangle(annotated_frame, (tempo_left, tempo_bar), (tempo_right, bar_bottom), (0, 165, 255), cv2.FILLED)
+            cv2.putText(annotated_frame, "Tempo", (tempo_left-5, bar_top-20), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,165,255), 2)
             cv2.putText(
                 annotated_frame,
-                f'Tempo: {int(self.sound_controller.tempo)}',
-                (140, 430),
-                cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 165, 255), 2
+                f'{int(self.sound_controller.tempo)}',
+                (tempo_left-5, bar_bottom+35),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,165,255), 2
             )
 
             cv2.imshow("Recognition Mode", annotated_frame)
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 break
         self.stop_webcam()
+
 
     def stop_training(self, address, *args):
         print("Stopping training...")
