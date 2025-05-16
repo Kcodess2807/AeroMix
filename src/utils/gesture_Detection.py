@@ -11,9 +11,9 @@ class GestureDetector:
         self.mp_drawing_styles = mp.solutions.drawing_styles
         self.hands = self.mp_hands.Hands(
             static_image_mode=False,
-            max_num_hands=2,
-            min_detection_confidence=0.5,
-            min_tracking_confidence=0.5
+            max_num_hands=1,  # Focus on one hand for simplicity
+            min_detection_confidence=0.7,
+            min_tracking_confidence=0.7
         )
         self.last_landmarks = None
         self.last_detection_time = 0
@@ -27,16 +27,19 @@ class GestureDetector:
                 print(f"Warning (hands.close): {e}")
         self.hands = self.mp_hands.Hands(
             static_image_mode=False,
-            max_num_hands=1, #as of now, considering single hand
+            max_num_hands=1,
             min_detection_confidence=0.7,
             min_tracking_confidence=0.7
         )
 
     def detect_landmarks(self, frame):
+        # Preprocess frame to improve detection
         frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        frame_rgb = cv2.convertScaleAbs(frame_rgb, alpha=1.2, beta=10)  # Increase contrast
         results = self.hands.process(frame_rgb)
         annotated_frame = frame.copy()
         landmarks_dict = {"pose": [], "left_hand": [], "right_hand": []}
+        
         if results.multi_hand_landmarks:
             for idx, hand_landmarks in enumerate(results.multi_hand_landmarks):
                 handedness = "left_hand"
@@ -66,7 +69,7 @@ class GestureDetector:
         for hand in ['left_hand', 'right_hand']:
             if hand in landmarks_dict and landmarks_dict[hand]:
                 for lm in landmarks_dict[hand]:
-                    features.extend([lm['x'], lm['y'], lm['z']])
+                    features.extend([lm['x'], lm['y']])  # Exclude z-coordinate
         return np.array(features)
 
     def release(self):
