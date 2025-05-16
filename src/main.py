@@ -5,6 +5,7 @@ import argparse
 import os
 import numpy as np
 import threading
+
 from utils.osc_handler import OSCHandler
 from ml.classifier import GestureClassifier
 from ml.trainer import GestureTrainer
@@ -244,8 +245,6 @@ class AeroMixApp:
             else:
                 print("Could not start webcam for training")
 
-
-    # In main.py, modify record_training_sample
     def record_training_sample(self, address, *args):
         print(f"record_training_sample called with args: {args}")
         args = self.clean_args(args)
@@ -260,12 +259,7 @@ class AeroMixApp:
                 if not landmarks or (not landmarks["left_hand"] and not landmarks["right_hand"]):
                     print("No hand detected in frame, sample not recorded.")
                     return
-                # Allow manual neutral sample with 'n' key
-                key = cv2.waitKey(200) & 0xFF
-                if key == ord('n'):
-                    label = "neutral"
-                else:
-                    label = args[0] if args else self.trainer.current_gesture
+                label = args[0] if args else self.trainer.current_gesture
                 self.trainer.add_sample(landmarks, label)
                 print(f"Sample recorded for {label}, total samples={len(self.trainer.training_data)}")
                 display_frame = annotated_frame.copy()
@@ -324,6 +318,7 @@ class AeroMixApp:
                         if pred == gesture_name:
                             pred_this_frame = pred
                             break
+
                 if pred_this_frame:
                     pred_history.append(pred_this_frame)
                     if len(pred_history) > HISTORY_SIZE:
@@ -333,7 +328,7 @@ class AeroMixApp:
                         for gesture in pred_history:
                             gesture_counts[gesture] = gesture_counts.get(gesture, 0) + 1
                         most_common = max(gesture_counts, key=gesture_counts.get, default=None)
-                        if (most_common and 
+                        if (most_common and
                             gesture_counts[most_common] >= PRED_THRESHOLD and
                             current_time - last_gesture_time > GESTURE_COOLDOWN):
                             self.process_gesture(most_common)
@@ -350,6 +345,7 @@ class AeroMixApp:
                 )
                 label_timer -= 1
 
+            # Draw a volume bar
             bar_top = 150
             bar_bottom = 400
             bar_left = 50
@@ -363,6 +359,8 @@ class AeroMixApp:
                 (40, 430),
                 cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2
             )
+
+            # Draw a bass bar
             bass_bar_left = 100
             bass_bar_right = 135
             bass_bar = int(np.interp(self.sound_controller.bass, [0.0, 1.0], [bar_bottom, bar_top]))
@@ -373,6 +371,21 @@ class AeroMixApp:
                 f'Bass: {int(self.sound_controller.bass*100)}%',
                 (90, 430),
                 cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2
+            )
+
+            # Draw a tempo bar
+            tempo_bar_left = 150
+            tempo_bar_right = 185
+            tempo_min = 60
+            tempo_max = 200
+            tempo_bar = int(np.interp(self.sound_controller.tempo, [tempo_min, tempo_max], [bar_bottom, bar_top]))
+            cv2.rectangle(annotated_frame, (tempo_bar_left, bar_top), (tempo_bar_right, bar_bottom), (0, 0, 0), 3)
+            cv2.rectangle(annotated_frame, (tempo_bar_left, tempo_bar), (tempo_bar_right, bar_bottom), (0, 165, 255), cv2.FILLED)
+            cv2.putText(
+                annotated_frame,
+                f'Tempo: {int(self.sound_controller.tempo)}',
+                (140, 430),
+                cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 165, 255), 2
             )
 
             cv2.imshow("Recognition Mode", annotated_frame)
