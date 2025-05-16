@@ -1,6 +1,8 @@
 import numpy as np
 import os
 from .classifier import GestureClassifier
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import classification_report
 
 class GestureTrainer:
     def __init__(self, save_dir="model/trained"):
@@ -10,8 +12,6 @@ class GestureTrainer:
         self.training_labels = []
         self.is_training = False
         self.current_gesture = None
-
-        # Ensure save directory exists
         os.makedirs(self.save_dir, exist_ok=True)
 
     def start_training(self, gesture_name):
@@ -22,41 +22,59 @@ class GestureTrainer:
         self.is_training = True
         self.current_gesture = gesture_name
 
-    def add_sample(self, landmarks, is_gesture=True):
-        """Add a training sample"""
-        print(f"add_sample called. Landmarks: {landmarks}, is_gesture: {is_gesture}")
+    def add_sample(self, landmarks, label):
+        """Add a training sample with explicit label (gesture or neutral)"""
+        print(f"add_sample called. Landmarks: {landmarks}, label: {label}")
         if not self.is_training:
             print("Not in training mode, sample not added.")
             return
 
-        # Process landmarks to extract features
         features = self.classifier.preprocess_landmarks(landmarks)
         print(f"Extracted features: {features}")
 
-        # Skip if features are empty or malformed
         if features.size == 0 or (features.ndim > 1 and features.shape[1] == 0):
             print("Warning: Empty features detected, sample skipped")
             return
 
-        # Add to training data (flatten if needed)
         self.training_data.append(features.flatten())
-        label = self.current_gesture if is_gesture else "OTHER"
         self.training_labels.append(label)
-        print(f"Sample added. Current training data length: {len(self.training_data)}")
+        print(f"Sample added. Label: {label}, Current training data length: {len(self.training_data)}")
 
     def train_model(self):
         """Train the model with collected samples"""
-        if not self.is_training or len(self.training_data) == 0:
-            print("No training data available")
+        if not self.is_training or len(self.training_data) < 50:
+            print(f"Insufficient training data: {len(self.training_data)} samples. Need at least 50.")
             return False
 
-        # Convert to numpy arrays
         X = np.array(self.training_data)
         y = np.array(self.training_labels)
-        print(f"Training model with {len(X)} samples. Labels: {np.unique(y)}")
+        unique_labels, counts = np.unique(y, return_counts=True)
+        print(f"Training model with {len(X)} samples. Labels: {unique_labels}, Counts: {counts}")
 
-        # Train the classifier
-        self.classifier.train(X, y)
+        if len(unique_labels) < 2:
+            print("Need at least two classes (gesture and neutral) for training.")
+            return False
+
+        # Split data for validation
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+        
+        # Train classifier
+        self.classifier.train(X_train, y_train)
+        
+        # Evaluate on test set
+        y_pred = []
+        for features in X_test:
+            pred = self.classifier.predict(features.reshape(1, -1))
+            y_pred.append(pred)
+        
+        print("Classification Report:")
+        # Filter out NO_GESTURE for reporting
+        filtered = [(yt, yp) for yt, yp in zip(y_test, y_pred) if yp != "NO_GESTURE"]
+        if filtered:
+            y_test_filtered, y_pred_filtered = zip(*filtered)
+            print(classification_report(y_test_filtered, y_pred_filtered))
+        else:
+            print("No valid predictions to report (all predictions were NO_GESTURE).")
 
         # Save the model
         model_path = os.path.join(self.save_dir, f"{self.current_gesture}_model.pkl")
@@ -67,7 +85,6 @@ class GestureTrainer:
             print(f"Error saving model: {e}")
             return False
 
-        self.is_training = False
         return True
 
     def stop_training(self):

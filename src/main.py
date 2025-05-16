@@ -5,7 +5,6 @@ import argparse
 import os
 import numpy as np
 import threading
-
 from utils.osc_handler import OSCHandler
 from ml.classifier import GestureClassifier
 from ml.trainer import GestureTrainer
@@ -27,8 +26,6 @@ class AeroMixApp:
         self.gesture_detector = GestureDetector()
         self._detector_released = False
         self.setup_osc_handlers()
-
-        # --- PLAY AUDIO ON STARTUP (only in recognition mode) ---
         if not self.training_mode:
             self.sound_controller.control_playback("play", "data/audio/sample1.mp3")
 
@@ -44,7 +41,7 @@ class AeroMixApp:
                 model_path = os.path.join(model_dir, filename)
                 try:
                     self.gestures[gesture_name] = GestureClassifier(model_path)
-                    print(f"Loaded model for gesture: {gesture_name} from {model_path}")
+                    print(f"Loaded model for gesture: {gesture_name}")
                 except Exception as e:
                     print(f"Failed to load model for {gesture_name}: {e}")
         print(f"Loaded gestures: {list(self.gestures.keys())}")
@@ -154,14 +151,14 @@ class AeroMixApp:
             self.sound_controller.adjust_tempo(5.0)
         elif gesture == "tempo_down":
             self.sound_controller.adjust_tempo(-5.0)
-        elif gesture == "pitch_up":
-            self.sound_controller.adjust_pitch(0.1)
-        elif gesture == "pitch_down":
-            self.sound_controller.adjust_pitch(-0.1)
         elif gesture == "bass_up":
             self.sound_controller.adjust_bass(0.1)
         elif gesture == "bass_down":
             self.sound_controller.adjust_bass(-0.1)
+        elif gesture == "pitch_up":
+            self.sound_controller.adjust_pitch(0.1)
+        elif gesture == "pitch_down":
+            self.sound_controller.adjust_pitch(-0.1)
         elif gesture == "play":
             self.sound_controller.control_playback("play", "data/audio/sample1.mp3")
 
@@ -206,11 +203,13 @@ class AeroMixApp:
                 print(f"Started training for gesture: {gesture_name}")
                 print("Webcam activated for training. Press 'q' to stop training.")
 
-                # --- AUTOMATIC SAMPLE RECORDING EVERY 300ms ---
                 def auto_record():
                     while self.training_mode and self.webcam.isOpened():
-                        self.record_training_sample(address, 1)
-                        time.sleep(0.3)  # Adjust interval as needed
+                        # Alternate between gesture and neutral samples
+                        self.record_training_sample(address, gesture_name)
+                        time.sleep(0.3)
+                        self.record_training_sample(address, "neutral")
+                        time.sleep(0.3)
 
                 threading.Thread(target=auto_record, daemon=True).start()
 
@@ -246,58 +245,40 @@ class AeroMixApp:
             else:
                 print("Could not start webcam for training")
 
+    # In main.py, modify record_training_sample
     def record_training_sample(self, address, *args):
         print(f"record_training_sample called with args: {args}")
         args = self.clean_args(args)
         if not self.training_mode or not self.webcam or not self.webcam.isOpened() or self._detector_released:
             print("Training not active or webcam not open, skipping sample.")
             return
-        if len(args) > 0:  # Now works for both manual and auto-record
-            try:
-                ret, frame = self.webcam.read()
-                if ret:
-                    frame = cv2.flip(frame, 1)
-                    try:
-                        landmarks, annotated_frame = self.gesture_detector.detect_landmarks(frame)
-                    except Exception as e:
-                        print(f"Warning (detect_landmarks in record_training_sample): {e}")
-                        return
-                    if not landmarks or (not landmarks["left_hand"] and not landmarks["right_hand"]):
-                        print("No hand detected in frame, sample not recorded.")
-                        return
-                    is_gesture = bool(int(args[-1]))
-                    self.trainer.add_sample(landmarks, is_gesture)
-                    print(f"Sample recorded for {self.trainer.current_gesture}, is_gesture={is_gesture}, total samples={len(self.trainer.training_data)}")
-                    display_frame = annotated_frame.copy()
-                    color = (0, 255, 0) if is_gesture else (0, 255, 255)
-                    cv2.rectangle(display_frame, (0, 0), (frame.shape[1], frame.shape[0]), color, 10)
-                    cv2.putText(display_frame, "SAMPLE RECORDED!", (20, 50),
-                                cv2.FONT_HERSHEY_SIMPLEX, 1, color, 2)
-                    sample_count = len(self.trainer.training_data)
-                    cv2.putText(display_frame, f"Samples: {sample_count}", (20, 90),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
-                    cv2.imshow('Training Mode - Press q to stop', display_frame)
-                    cv2.waitKey(200)
-            except Exception as e:
-                print(f"Error recording training sample: {e}")
-
-    def show_webcam_frame(self):
-        if self.webcam is not None and self.webcam.isOpened():
+        try:
             ret, frame = self.webcam.read()
             if ret:
                 frame = cv2.flip(frame, 1)
-                cv2.putText(frame, "TRAINING MODE", (20, 30),
+                landmarks, annotated_frame = self.gesture_detector.detect_landmarks(frame)
+                if not landmarks or (not landmarks["left_hand"] and not landmarks["right_hand"]):
+                    print("No hand detected in frame, sample not recorded.")
+                    return
+                # Allow manual neutral sample with 'n' key
+                key = cv2.waitKey(200) & 0xFF
+                if key == ord('n'):
+                    label = "neutral"
+                else:
+                    label = args[0] if args else self.trainer.current_gesture
+                self.trainer.add_sample(landmarks, label)
+                print(f"Sample recorded for {label}, total samples={len(self.trainer.training_data)}")
+                display_frame = annotated_frame.copy()
+                color = (0, 255, 0) if label != "neutral" else (0, 255, 255)
+                cv2.rectangle(display_frame, (0, 0), (frame.shape[1], frame.shape[0]), color, 10)
+                cv2.putText(display_frame, f"SAMPLE RECORDED: {label}", (20, 50),
+                            cv2.FONT_HERSHEY_SIMPLEX, 1, color, 2)
+                sample_count = len(self.trainer.training_data)
+                cv2.putText(display_frame, f"Samples: {sample_count}", (20, 90),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
-                cv2.putText(frame, f"Gesture: {self.trainer.current_gesture}", (20, 60),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-                cv2.putText(frame, "Press 'q' to stop training", (20, frame.shape[0] - 20),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
-                if hasattr(self.trainer, 'training_data'):
-                    sample_count = len(self.trainer.training_data)
-                    cv2.putText(frame, f"Samples: {sample_count}", (20, 90),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-                cv2.imshow('Training Mode - Press q to stop', frame)
-                cv2.waitKey(1)
+                cv2.imshow('Training Mode - Press q to stop', display_frame)
+        except Exception as e:
+            print(f"Error recording training sample: {e}")
 
     def run_recognition(self):
         print("Starting real-time gesture recognition...")
@@ -317,14 +298,13 @@ class AeroMixApp:
             print("Could not open webcam for recognition.")
             return
 
-        # Enhanced gesture recognition with observation window
         pred_history = []
-        HISTORY_SIZE = 5
-        PRED_THRESHOLD = 3  # Minimum consecutive frames for a gesture
+        HISTORY_SIZE = 10
+        PRED_THRESHOLD = 7
         last_label = ""
         label_timer = 0
         last_gesture_time = 0
-        GESTURE_COOLDOWN = 0.5  # Seconds to wait before detecting same gesture again
+        GESTURE_COOLDOWN = 0.5
 
         while True:
             ret, frame = self.webcam.read()
@@ -337,49 +317,32 @@ class AeroMixApp:
             current_time = time.time()
 
             if landmarks and (landmarks["left_hand"] or landmarks["right_hand"]):
-                # Try to detect a gesture
                 for gesture_name, classifier in self.gestures.items():
                     features = classifier.preprocess_landmarks(landmarks)
                     if features.size > 0:
                         pred = classifier.predict(features)
                         if pred == gesture_name:
                             pred_this_frame = pred
-                            break  # Only process the first matching gesture
-                
-                # Add to history
-                if pred_this_frame is not None:
+                            break
+                if pred_this_frame:
                     pred_history.append(pred_this_frame)
                     if len(pred_history) > HISTORY_SIZE:
                         pred_history.pop(0)
-                    
-                    # Check if we have enough consistent predictions
                     if len(pred_history) >= PRED_THRESHOLD:
-                        # Count occurrences of each gesture in the history
                         gesture_counts = {}
                         for gesture in pred_history:
-                            if gesture in gesture_counts:
-                                gesture_counts[gesture] += 1
-                            else:
-                                gesture_counts[gesture] = 1
-                        
-                        # Find the most common gesture
+                            gesture_counts[gesture] = gesture_counts.get(gesture, 0) + 1
                         most_common = max(gesture_counts, key=gesture_counts.get, default=None)
-                        
-                        # Only trigger if the gesture appears consistently and cooldown has passed
-                        if (most_common is not None and 
+                        if (most_common and 
                             gesture_counts[most_common] >= PRED_THRESHOLD and
                             current_time - last_gesture_time > GESTURE_COOLDOWN):
-                            
                             self.process_gesture(most_common)
                             recognized_label = label_map.get(most_common, most_common)
                             last_label = recognized_label
-                            label_timer = 15  # Show label for 15 frames
+                            label_timer = 15
                             last_gesture_time = current_time
-                            
-                            # Clear history after triggering to avoid rapid repeats
                             pred_history = []
 
-            # Draw the last recognized label for a short time
             if label_timer > 0 and last_label:
                 cv2.putText(
                     annotated_frame, f"{last_label}", (20, 60),
@@ -387,7 +350,6 @@ class AeroMixApp:
                 )
                 label_timer -= 1
 
-            # Draw a volume bar
             bar_top = 150
             bar_bottom = 400
             bar_left = 50
@@ -401,8 +363,6 @@ class AeroMixApp:
                 (40, 430),
                 cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2
             )
-
-            # Draw a bass bar next to volume bar
             bass_bar_left = 100
             bass_bar_right = 135
             bass_bar = int(np.interp(self.sound_controller.bass, [0.0, 1.0], [bar_bottom, bar_top]))
@@ -415,25 +375,10 @@ class AeroMixApp:
                 cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2
             )
 
-            # Draw confidence meter (optional)
-            if pred_history:
-                most_common = max(set(pred_history), key=pred_history.count)
-                confidence = pred_history.count(most_common) / len(pred_history)
-                conf_width = int(100 * confidence)
-                cv2.rectangle(annotated_frame, (500, 50), (500 + conf_width, 70), (0, 255, 255), cv2.FILLED)
-                cv2.rectangle(annotated_frame, (500, 50), (600, 70), (0, 0, 0), 2)
-                cv2.putText(
-                    annotated_frame,
-                    f'Confidence',
-                    (500, 40),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1
-                )
-
             cv2.imshow("Recognition Mode", annotated_frame)
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 break
         self.stop_webcam()
-
 
     def stop_training(self, address, *args):
         print("Stopping training...")
@@ -448,7 +393,6 @@ class AeroMixApp:
             self.load_gesture_models(self.trainer.save_dir)
         self.training_mode = False
         print("Training stopped")
-        print(f"Stopping training for {self.trainer.current_gesture}. Total samples: {len(self.trainer.training_data)}")
 
     def run(self):
         self.running = True
