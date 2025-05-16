@@ -202,16 +202,7 @@ class AeroMixApp:
             if self.start_webcam():
                 print(f"Started training for gesture: {gesture_name}")
                 print("Webcam activated for training. Press 'q' to stop training.")
-
-                def auto_record():
-                    while self.training_mode and self.webcam.isOpened():
-                        # Alternate between gesture and neutral samples
-                        self.record_training_sample(address, gesture_name)
-                        time.sleep(0.3)
-                        self.record_training_sample(address, "neutral")
-                        time.sleep(0.3)
-
-                threading.Thread(target=auto_record, daemon=True).start()
+                print("Press 'g' to record a GESTURE sample, 'n' for NEUTRAL sample.")
 
                 while self.training_mode and self.webcam.isOpened():
                     ret, frame = self.webcam.read()
@@ -232,18 +223,27 @@ class AeroMixApp:
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
                     cv2.putText(annotated_frame, f"Gesture: {self.trainer.current_gesture}", (20, 60),
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-                    cv2.putText(annotated_frame, "Press 'q' to stop training", (20, frame.shape[0] - 20),
+                    cv2.putText(annotated_frame, "Press 'g' for gesture, 'n' for neutral, 'q' to stop", (20, frame.shape[0] - 20),
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
                     if hasattr(self.trainer, 'training_data'):
                         sample_count = len(self.trainer.training_data)
                         cv2.putText(annotated_frame, f"Samples: {sample_count}", (20, 90),
                                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
                     cv2.imshow('Training Mode - Press q to stop', annotated_frame)
-                    if cv2.waitKey(1) & 0xFF == ord('q'):
+
+                    key = cv2.waitKey(1) & 0xFF
+                    if key == ord('q'):
                         self.stop_training(address)
                         break
+                    elif key == ord('g'):
+                        print("Pressed 'g': Recording gesture sample.")
+                        self.record_training_sample(address, self.trainer.current_gesture)
+                    elif key == ord('n'):
+                        print("Pressed 'n': Recording neutral sample.")
+                        self.record_training_sample(address, "neutral")
             else:
                 print("Could not start webcam for training")
+
 
     # In main.py, modify record_training_sample
     def record_training_sample(self, address, *args):
