@@ -28,12 +28,6 @@ class AeroMixApp:
         self._detector_released = False
         self.setup_osc_handlers()
         
-        # Initialize visualization variables
-        self.bass_ripples = []
-        self.tempo_angle = 0
-        self.volume_particles = []
-        self.last_update_time = time.time()
-        
         if not self.training_mode:
             self.sound_controller.control_playback("play", "data/audio/audio3.mp3")
 
@@ -91,8 +85,6 @@ class AeroMixApp:
         self.osc_server_thread = self.osc_handler.start_server()
 
     def handle_landmarks(self, address, *args):
-        print(f"Received message at address: {address}")
-        print(f"Arguments: {args}")
         args = self.clean_args(args)
         if len(args) > 0:
             try:
@@ -113,7 +105,6 @@ class AeroMixApp:
                 print(f"Error processing landmarks: {e}")
 
     def reconstruct_landmarks_from_list(self, args):
-        print(f"Reconstructing landmarks from list: {args}")
         landmarks = {"pose": [], "left_hand": [], "right_hand": []}
         
         if len(args) > 0 and isinstance(args[0], (list, tuple)):
@@ -139,16 +130,13 @@ class AeroMixApp:
         return landmarks
 
     def recognize_gesture(self, landmarks):
-        print("Recognizing gesture...")
         detected_gestures = []
         
         for gesture_name, classifier in self.gestures.items():
             try:
                 features = classifier.preprocess_landmarks(landmarks)
-                print(f"[DEBUG] Features for {gesture_name}: {features}")
                 if features.size > 0:
                     prediction = classifier.predict(features)
-                    print(f"[DEBUG] Predicted: {prediction}, Target: {gesture_name}")
                     if prediction == gesture_name:
                         detected_gestures.append(gesture_name)
                         print(f"Detected gesture: {gesture_name}")
@@ -308,92 +296,6 @@ class AeroMixApp:
         except Exception as e:
             print(f"Error recording training sample: {e}")
 
-    # Bass ripple visualization
-    def update_bass_ripples(self, frame, bass_value, center_x, center_y):
-        # Add a new ripple when bass changes significantly
-        current_time = time.time()
-        if current_time - self.last_update_time > 0.1:
-            self.bass_ripples.append({
-                'center': (center_x, center_y),
-                'radius': 10,
-                'max_radius': 100 + bass_value * 100,
-                'alpha': 0.8,
-                'color': (0, 0, 255)  # Red for bass
-            })
-            self.last_update_time = current_time
-        
-        # Update and draw existing ripples
-        new_ripples = []
-        for ripple in self.bass_ripples:
-            ripple['radius'] += 2
-            ripple['alpha'] -= 0.01
-            
-            if ripple['alpha'] > 0 and ripple['radius'] < ripple['max_radius']:
-                alpha = int(ripple['alpha'] * 255)
-                color = ripple['color'] + (alpha,)
-                cv2.circle(frame, ripple['center'], int(ripple['radius']), ripple['color'], 2)
-                new_ripples.append(ripple)
-        
-        self.bass_ripples = new_ripples
-        return frame
-
-    # Tempo orbital visualization
-    def update_tempo_visual(self, frame, tempo_value, center_x, center_y, radius=50):
-        # Update angle based on tempo
-        self.tempo_angle += (tempo_value / 60) * 0.1
-        if self.tempo_angle > 2 * np.pi:
-            self.tempo_angle -= 2 * np.pi
-        
-        # Draw orbit path
-        cv2.circle(frame, (center_x, center_y), radius, (0, 165, 255), 1)
-        
-        # Calculate position on orbit
-        x = int(center_x + radius * np.cos(self.tempo_angle))
-        y = int(center_y + radius * np.sin(self.tempo_angle))
-        
-        # Draw orbiting object
-        cv2.circle(frame, (x, y), 10, (0, 165, 255), -1)
-        
-        # Draw lines from center to orbiting object for visual interest
-        cv2.line(frame, (center_x, center_y), (x, y), (0, 165, 255), 1)
-        
-        return frame
-
-    # Volume particle visualization
-    def update_volume_particles(self, frame, volume_value, center_x, center_y):
-        # Add new particles based on volume
-        num_new_particles = int(volume_value * 3)
-        for _ in range(num_new_particles):
-            angle = np.random.uniform(0, 2 * np.pi)
-            speed = np.random.uniform(1, 3 + volume_value * 5)
-            size = np.random.uniform(2, 5 + volume_value * 10)
-            self.volume_particles.append({
-                'pos': [center_x, center_y],
-                'vel': [speed * np.cos(angle), speed * np.sin(angle)],
-                'size': size,
-                'color': (0, 255, 0),  # Green for volume
-                'life': 1.0
-            })
-        
-        # Update and draw existing particles
-        new_particles = []
-        for particle in self.volume_particles:
-            # Update position
-            particle['pos'][0] += particle['vel'][0]
-            particle['pos'][1] += particle['vel'][1]
-            particle['life'] -= 0.02
-            
-            # Draw if still alive
-            if particle['life'] > 0:
-                alpha = int(particle['life'] * 255)
-                pos = (int(particle['pos'][0]), int(particle['pos'][1]))
-                size = int(particle['size'])
-                cv2.circle(frame, pos, size, particle['color'], -1)
-                new_particles.append(particle)
-        
-        self.volume_particles = new_particles
-        return frame
-
     def run_recognition(self):
         print("Starting real-time gesture recognition...")
         print(f"Available gesture models: {list(self.gestures.keys())}")
@@ -467,43 +369,42 @@ class AeroMixApp:
                 )
                 label_timer -= 1
             
-            # --- Improved Visualizer Layout ---
-            
+            # --- Simplified Visualizer Layout ---
             bar_top = 150
             bar_bottom = 400
-            bar_width = 35
-            bar_gap = 60  # Increased gap for clarity
-            
+            bar_width = 50
+            bar_gap = 80  # Increased gap for better spacing
+
             # Volume bar
-            vol_left = 50
+            vol_left = 100
             vol_right = vol_left + bar_width
             vol_bar = int(np.interp(self.sound_controller.volume, [0.0, 1.0], [bar_bottom, bar_top]))
             cv2.rectangle(annotated_frame, (vol_left, bar_top-10), (vol_right, bar_bottom+10), (30, 30, 30), -1)  # background
             cv2.rectangle(annotated_frame, (vol_left, bar_top), (vol_right, bar_bottom), (0, 0, 0), 2)
             cv2.rectangle(annotated_frame, (vol_left, vol_bar), (vol_right, bar_bottom), (0, 255, 0), cv2.FILLED)
-            cv2.putText(annotated_frame, "Volume", (vol_left-5, bar_top-20), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,255,0), 2)
+            cv2.putText(annotated_frame, "Volume", (vol_left-10, bar_top-20), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,255,0), 2)
             cv2.putText(
                 annotated_frame,
                 f'{int(self.sound_controller.volume*100)}%',
-                (vol_left-5, bar_bottom+35),
+                (vol_left-10, bar_bottom+35),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,255,0), 2
             )
-            
+
             # Bass bar
             bass_left = vol_right + bar_gap
             bass_right = bass_left + bar_width
             bass_bar = int(np.interp(self.sound_controller.bass, [0.0, 1.0], [bar_bottom, bar_top]))
             cv2.rectangle(annotated_frame, (bass_left, bar_top-10), (bass_right, bar_bottom+10), (30, 30, 30), -1)
             cv2.rectangle(annotated_frame, (bass_left, bar_top), (bass_right, bar_bottom), (0, 0, 0), 2)
-            cv2.rectangle(annotated_frame, (bass_left, bass_bar), (bass_right, bar_bottom), (255, 0, 0), cv2.FILLED)
-            cv2.putText(annotated_frame, "Bass", (bass_left-2, bar_top-20), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255,0,0), 2)
+            cv2.rectangle(annotated_frame, (bass_left, bass_bar), (bass_right, bar_bottom), (0, 0, 255), cv2.FILLED)
+            cv2.putText(annotated_frame, "Bass", (bass_left-5, bar_top-20), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,0,255), 2)
             cv2.putText(
                 annotated_frame,
                 f'{int(self.sound_controller.bass*100)}%',
-                (bass_left-2, bar_bottom+35),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255,0,0), 2
+                (bass_left-5, bar_bottom+35),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,0,255), 2
             )
-            
+
             # Tempo bar
             tempo_left = bass_right + bar_gap
             tempo_right = tempo_left + bar_width
@@ -520,16 +421,21 @@ class AeroMixApp:
                 (tempo_left-5, bar_bottom+35),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,165,255), 2
             )
-            
-            # Add advanced visualizations
-            # Volume particles in top left
-            annotated_frame = self.update_volume_particles(annotated_frame, self.sound_controller.volume, 150, 80)
-            
-            # Bass ripples in bottom right
-            annotated_frame = self.update_bass_ripples(annotated_frame, self.sound_controller.bass, 500, 400)
-            
-            # Tempo orbital in bottom left
-            annotated_frame = self.update_tempo_visual(annotated_frame, self.sound_controller.tempo, 150, 400)
+
+            # Pitch bar
+            pitch_left = tempo_right + bar_gap
+            pitch_right = pitch_left + bar_width
+            pitch_bar = int(np.interp(self.sound_controller.pitch, [0.5, 2.0], [bar_bottom, bar_top]))
+            cv2.rectangle(annotated_frame, (pitch_left, bar_top-10), (pitch_right, bar_bottom+10), (30, 30, 30), -1)
+            cv2.rectangle(annotated_frame, (pitch_left, bar_top), (pitch_right, bar_bottom), (0, 0, 0), 2)
+            cv2.rectangle(annotated_frame, (pitch_left, pitch_bar), (pitch_right, bar_bottom), (255, 0, 255), cv2.FILLED)
+            cv2.putText(annotated_frame, "Pitch", (pitch_left-5, bar_top-20), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255,0,255), 2)
+            cv2.putText(
+                annotated_frame,
+                f'{self.sound_controller.pitch:.1f}',
+                (pitch_left-5, bar_bottom+35),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255,0,255), 2
+            )
             
             cv2.imshow("Recognition Mode", annotated_frame)
             if cv2.waitKey(1) & 0xFF == ord('q'):
