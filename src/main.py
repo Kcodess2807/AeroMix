@@ -5,12 +5,12 @@ import argparse
 import os
 import numpy as np
 import threading
-
 from utils.osc_handler import OSCHandler
 from ml.classifier import GestureClassifier
 from ml.trainer import GestureTrainer
 from sound_control import SoundController
 from utils.gesture_Detection import GestureDetector
+from pyo import *
 
 class AeroMixApp:
     def __init__(self, model_dir="model/trained", training_mode=False):
@@ -27,6 +27,13 @@ class AeroMixApp:
         self.gesture_detector = GestureDetector()
         self._detector_released = False
         self.setup_osc_handlers()
+        
+        # Initialize visualization variables
+        self.bass_ripples = []
+        self.tempo_angle = 0
+        self.volume_particles = []
+        self.last_update_time = time.time()
+        
         if not self.training_mode:
             self.sound_controller.control_playback("play", "data/audio/audio3.mp3")
 
@@ -36,6 +43,7 @@ class AeroMixApp:
         if not os.path.exists(model_dir):
             os.makedirs(model_dir, exist_ok=True)
             return
+        
         for filename in os.listdir(model_dir):
             if filename.endswith("_model.pkl"):
                 gesture_name = filename.replace("_model.pkl", "")
@@ -45,6 +53,7 @@ class AeroMixApp:
                     print(f"Loaded model for gesture: {gesture_name}")
                 except Exception as e:
                     print(f"Failed to load model for {gesture_name}: {e}")
+        
         print(f"Loaded gestures: {list(self.gestures.keys())}")
 
     @staticmethod
@@ -95,6 +104,7 @@ class AeroMixApp:
                         return
                 else:
                     landmarks = self.reconstruct_landmarks_from_list(args)
+                
                 if self.training_mode:
                     print("Training mode active: not processing landmarks for recognition.")
                 else:
@@ -105,15 +115,18 @@ class AeroMixApp:
     def reconstruct_landmarks_from_list(self, args):
         print(f"Reconstructing landmarks from list: {args}")
         landmarks = {"pose": [], "left_hand": [], "right_hand": []}
+        
         if len(args) > 0 and isinstance(args[0], (list, tuple)):
             coords = args[0]
         else:
             coords = args
+        
         try:
             pose_points = min(33*2, len(coords))
             for i in range(0, pose_points, 2):
                 if i+1 < len(coords):
                     landmarks["pose"].append({"x": float(coords[i]), "y": float(coords[i+1]), "z": 0.0})
+            
             remaining = len(coords) - pose_points
             if remaining > 0:
                 hand_points = min(21*2, remaining)
@@ -122,11 +135,13 @@ class AeroMixApp:
                         landmarks["left_hand"].append({"x": float(coords[i]), "y": float(coords[i+1]), "z": 0.0})
         except Exception as e:
             print(f"Error reconstructing landmarks: {e}")
+        
         return landmarks
 
     def recognize_gesture(self, landmarks):
         print("Recognizing gesture...")
         detected_gestures = []
+        
         for gesture_name, classifier in self.gestures.items():
             try:
                 features = classifier.preprocess_landmarks(landmarks)
@@ -139,6 +154,7 @@ class AeroMixApp:
                         print(f"Detected gesture: {gesture_name}")
             except Exception as e:
                 print(f"Error predicting with model {gesture_name}: {e}")
+        
         for gesture in detected_gestures:
             self.process_gesture(gesture)
 
@@ -172,6 +188,7 @@ class AeroMixApp:
                 self.webcam.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
                 self.webcam.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
                 return True
+        
         print("Error: Could not open any camera")
         return False
 
@@ -183,35 +200,42 @@ class AeroMixApp:
                 self._detector_released = True
             except Exception as e:
                 print(f"Warning (gesture_detector.release): {e}")
+        
         if self.webcam is not None and self.webcam.isOpened():
             self.webcam.release()
-            cv2.destroyAllWindows()
-            print("Webcam stopped")
+        
+        cv2.destroyAllWindows()
+        print("Webcam stopped")
 
     def start_training(self, address, *args):
         print(f"start_training called with args: {args}")
         args = self.clean_args(args)
+        
         if hasattr(self, 'gesture_detector'):
             self.gesture_detector.reinitialize()
             self._detector_released = False
+        
         if len(args) > 0:
             gesture_name = args[0]
             print(f"Starting training for gesture: {gesture_name}")
             self.trainer.current_gesture = gesture_name
             self.trainer.start_training(gesture_name)
             self.training_mode = True
+            
             if self.start_webcam():
                 print(f"Started training for gesture: {gesture_name}")
                 print("Webcam activated for training. Press 'q' to stop training.")
                 print("Press 'g' to record a GESTURE sample, 'n' for NEUTRAL sample.")
-
+                
                 while self.training_mode and self.webcam.isOpened():
                     ret, frame = self.webcam.read()
                     if ret:
                         frame = cv2.flip(frame, 1)
+                    
                     if not ret:
                         print("Failed to grab frame from webcam")
                         break
+                    
                     if not self._detector_released:
                         try:
                             landmarks, annotated_frame = self.gesture_detector.detect_landmarks(frame)
@@ -220,18 +244,21 @@ class AeroMixApp:
                             break
                     else:
                         annotated_frame = frame
+                    
                     cv2.putText(annotated_frame, "TRAINING MODE", (20, 30),
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
                     cv2.putText(annotated_frame, f"Gesture: {self.trainer.current_gesture}", (20, 60),
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
                     cv2.putText(annotated_frame, "Press 'g' for gesture, 'n' for neutral, 'q' to stop", (20, frame.shape[0] - 20),
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
+                    
                     if hasattr(self.trainer, 'training_data'):
                         sample_count = len(self.trainer.training_data)
                         cv2.putText(annotated_frame, f"Samples: {sample_count}", (20, 90),
                                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+                    
                     cv2.imshow('Training Mode - Press q to stop', annotated_frame)
-
+                    
                     key = cv2.waitKey(1) & 0xFF
                     if key == ord('q'):
                         self.stop_training(address)
@@ -248,31 +275,124 @@ class AeroMixApp:
     def record_training_sample(self, address, *args):
         print(f"record_training_sample called with args: {args}")
         args = self.clean_args(args)
+        
         if not self.training_mode or not self.webcam or not self.webcam.isOpened() or self._detector_released:
             print("Training not active or webcam not open, skipping sample.")
             return
+        
         try:
             ret, frame = self.webcam.read()
             if ret:
                 frame = cv2.flip(frame, 1)
                 landmarks, annotated_frame = self.gesture_detector.detect_landmarks(frame)
+                
                 if not landmarks or (not landmarks["left_hand"] and not landmarks["right_hand"]):
                     print("No hand detected in frame, sample not recorded.")
                     return
+                
                 label = args[0] if args else self.trainer.current_gesture
                 self.trainer.add_sample(landmarks, label)
                 print(f"Sample recorded for {label}, total samples={len(self.trainer.training_data)}")
+                
                 display_frame = annotated_frame.copy()
                 color = (0, 255, 0) if label != "neutral" else (0, 255, 255)
                 cv2.rectangle(display_frame, (0, 0), (frame.shape[1], frame.shape[0]), color, 10)
                 cv2.putText(display_frame, f"SAMPLE RECORDED: {label}", (20, 50),
                             cv2.FONT_HERSHEY_SIMPLEX, 1, color, 2)
+                
                 sample_count = len(self.trainer.training_data)
                 cv2.putText(display_frame, f"Samples: {sample_count}", (20, 90),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+                
                 cv2.imshow('Training Mode - Press q to stop', display_frame)
         except Exception as e:
             print(f"Error recording training sample: {e}")
+
+    # Bass ripple visualization
+    def update_bass_ripples(self, frame, bass_value, center_x, center_y):
+        # Add a new ripple when bass changes significantly
+        current_time = time.time()
+        if current_time - self.last_update_time > 0.1:
+            self.bass_ripples.append({
+                'center': (center_x, center_y),
+                'radius': 10,
+                'max_radius': 100 + bass_value * 100,
+                'alpha': 0.8,
+                'color': (0, 0, 255)  # Red for bass
+            })
+            self.last_update_time = current_time
+        
+        # Update and draw existing ripples
+        new_ripples = []
+        for ripple in self.bass_ripples:
+            ripple['radius'] += 2
+            ripple['alpha'] -= 0.01
+            
+            if ripple['alpha'] > 0 and ripple['radius'] < ripple['max_radius']:
+                alpha = int(ripple['alpha'] * 255)
+                color = ripple['color'] + (alpha,)
+                cv2.circle(frame, ripple['center'], int(ripple['radius']), ripple['color'], 2)
+                new_ripples.append(ripple)
+        
+        self.bass_ripples = new_ripples
+        return frame
+
+    # Tempo orbital visualization
+    def update_tempo_visual(self, frame, tempo_value, center_x, center_y, radius=50):
+        # Update angle based on tempo
+        self.tempo_angle += (tempo_value / 60) * 0.1
+        if self.tempo_angle > 2 * np.pi:
+            self.tempo_angle -= 2 * np.pi
+        
+        # Draw orbit path
+        cv2.circle(frame, (center_x, center_y), radius, (0, 165, 255), 1)
+        
+        # Calculate position on orbit
+        x = int(center_x + radius * np.cos(self.tempo_angle))
+        y = int(center_y + radius * np.sin(self.tempo_angle))
+        
+        # Draw orbiting object
+        cv2.circle(frame, (x, y), 10, (0, 165, 255), -1)
+        
+        # Draw lines from center to orbiting object for visual interest
+        cv2.line(frame, (center_x, center_y), (x, y), (0, 165, 255), 1)
+        
+        return frame
+
+    # Volume particle visualization
+    def update_volume_particles(self, frame, volume_value, center_x, center_y):
+        # Add new particles based on volume
+        num_new_particles = int(volume_value * 3)
+        for _ in range(num_new_particles):
+            angle = np.random.uniform(0, 2 * np.pi)
+            speed = np.random.uniform(1, 3 + volume_value * 5)
+            size = np.random.uniform(2, 5 + volume_value * 10)
+            self.volume_particles.append({
+                'pos': [center_x, center_y],
+                'vel': [speed * np.cos(angle), speed * np.sin(angle)],
+                'size': size,
+                'color': (0, 255, 0),  # Green for volume
+                'life': 1.0
+            })
+        
+        # Update and draw existing particles
+        new_particles = []
+        for particle in self.volume_particles:
+            # Update position
+            particle['pos'][0] += particle['vel'][0]
+            particle['pos'][1] += particle['vel'][1]
+            particle['life'] -= 0.02
+            
+            # Draw if still alive
+            if particle['life'] > 0:
+                alpha = int(particle['life'] * 255)
+                pos = (int(particle['pos'][0]), int(particle['pos'][1]))
+                size = int(particle['size'])
+                cv2.circle(frame, pos, size, particle['color'], -1)
+                new_particles.append(particle)
+        
+        self.volume_particles = new_particles
+        return frame
 
     def run_recognition(self):
         print("Starting real-time gesture recognition...")
@@ -288,10 +408,11 @@ class AeroMixApp:
             "pitch_down": "Pitch Down",
             "play": "Play"
         }
+        
         if not self.start_webcam():
             print("Could not open webcam for recognition.")
             return
-
+        
         pred_history = []
         HISTORY_SIZE = 10
         PRED_THRESHOLD = 7
@@ -299,17 +420,18 @@ class AeroMixApp:
         label_timer = 0
         last_gesture_time = 0
         GESTURE_COOLDOWN = 0.5
-
+        
         while True:
             ret, frame = self.webcam.read()
             if not ret:
                 break
+            
             frame = cv2.flip(frame, 1)
             landmarks, annotated_frame = self.gesture_detector.detect_landmarks(frame)
             recognized_label = ""
             pred_this_frame = None
             current_time = time.time()
-
+            
             if landmarks and (landmarks["left_hand"] or landmarks["right_hand"]):
                 for gesture_name, classifier in self.gestures.items():
                     features = classifier.preprocess_landmarks(landmarks)
@@ -318,7 +440,7 @@ class AeroMixApp:
                         if pred == gesture_name:
                             pred_this_frame = pred
                             break
-
+                
                 if pred_this_frame:
                     pred_history.append(pred_this_frame)
                     if len(pred_history) > HISTORY_SIZE:
@@ -337,21 +459,21 @@ class AeroMixApp:
                             label_timer = 15
                             last_gesture_time = current_time
                             pred_history = []
-
+            
             if label_timer > 0 and last_label:
                 cv2.putText(
                     annotated_frame, f"{last_label}", (20, 60),
                     cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 255, 0), 3
                 )
                 label_timer -= 1
-
+            
             # --- Improved Visualizer Layout ---
-
+            
             bar_top = 150
             bar_bottom = 400
             bar_width = 35
             bar_gap = 60  # Increased gap for clarity
-
+            
             # Volume bar
             vol_left = 50
             vol_right = vol_left + bar_width
@@ -366,7 +488,7 @@ class AeroMixApp:
                 (vol_left-5, bar_bottom+35),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,255,0), 2
             )
-
+            
             # Bass bar
             bass_left = vol_right + bar_gap
             bass_right = bass_left + bar_width
@@ -381,7 +503,7 @@ class AeroMixApp:
                 (bass_left-2, bar_bottom+35),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255,0,0), 2
             )
-
+            
             # Tempo bar
             tempo_left = bass_right + bar_gap
             tempo_right = tempo_left + bar_width
@@ -398,12 +520,22 @@ class AeroMixApp:
                 (tempo_left-5, bar_bottom+35),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,165,255), 2
             )
-
+            
+            # Add advanced visualizations
+            # Volume particles in top left
+            annotated_frame = self.update_volume_particles(annotated_frame, self.sound_controller.volume, 150, 80)
+            
+            # Bass ripples in bottom right
+            annotated_frame = self.update_bass_ripples(annotated_frame, self.sound_controller.bass, 500, 400)
+            
+            # Tempo orbital in bottom left
+            annotated_frame = self.update_tempo_visual(annotated_frame, self.sound_controller.tempo, 150, 400)
+            
             cv2.imshow("Recognition Mode", annotated_frame)
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 break
+        
         self.stop_webcam()
-
 
     def stop_training(self, address, *args):
         print("Stopping training...")
@@ -413,16 +545,18 @@ class AeroMixApp:
                 self._detector_released = True
             except Exception as e:
                 print(f"Warning (gesture_detector.release): {e}")
+        
         self.stop_webcam()
         if self.trainer.stop_training():
             self.load_gesture_models(self.trainer.save_dir)
+        
         self.training_mode = False
         print("Training stopped")
 
     def run(self):
         self.running = True
         try:
-            print("AEROMIX is running with Pure Data. Press Ctrl+C to stop.")
+            print("AEROMIX is running with Pyo audio engine. Press Ctrl+C to stop.")
             if self.training_mode:
                 while self.running:
                     time.sleep(0.1)
@@ -433,16 +567,21 @@ class AeroMixApp:
         finally:
             self.stop_webcam()
             self.osc_handler.stop_server()
+            if hasattr(self.sound_controller, 'cleanup'):
+                self.sound_controller.cleanup()
 
 def main():
     parser = argparse.ArgumentParser(description='AEROMIX - Gesture-Based DJ System')
     parser.add_argument('--training', action='store_true', help='Start in training mode')
     parser.add_argument('--model-dir', type=str, default='model/trained', help='Directory for trained models')
+    
     args = parser.parse_args()
+    
     app = AeroMixApp(
         model_dir=args.model_dir,
         training_mode=args.training
     )
+    
     app.run()
 
 if __name__ == "__main__":
