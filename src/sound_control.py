@@ -62,7 +62,6 @@ class SoundController:
         self.tempo = max(60.0, min(200.0, self.tempo + value))
         print(f"SoundController: Adjusting tempo to {self.tempo}")
         self.tempo_sig.value = 60.0 / self.tempo
-        self.metro.time = self.tempo_sig
         if self.osc_handler:
             self.osc_handler.send_message("/tempo", self.tempo)
         return self.tempo
@@ -71,7 +70,6 @@ class SoundController:
         self.pitch = max(0.5, min(2.0, self.pitch + value))
         print(f"SoundController: Adjusting pitch to {self.pitch}")
         self.pitch_sig.value = self.pitch
-        # If you have a pitch shifter, assign self.pitch_sig to its parameter here
         if self.osc_handler:
             self.osc_handler.send_message("/pitch", self.pitch)
         return self.pitch
