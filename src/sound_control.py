@@ -30,14 +30,20 @@ class SoundController:
         self.current_track = None
         self.is_playing = False
 
+        # --- CREATE SIGTO OBJECTS FOR SMOOTH CONTROL ---
+        self.volume_sig = SigTo(value=self.volume * 0.2, time=0.01)
+        self.bass_freq_sig = SigTo(value=self.bass * 4980 + 20, time=0.05)
+        self.tempo_sig = SigTo(value=60.0 / self.tempo, time=0.05)
+        self.pitch_sig = SigTo(value=self.pitch, time=0.05)
+
         # --- NOW SAFE TO SETUP METRO ---
         self._setup_metro()
 
         # --- CREATE PYO AUDIO OBJECTS ONLY AFTER SERVER IS BOOTED ---
         self.noise = Noise(mul=0.5)
-        self.bass_filter = ButLP(self.noise, freq=1000)
+        self.bass_filter = ButLP(self.noise, freq=self.bass_freq_sig)
         self.envelope = Sig(1)
-        self.output = self.bass_filter * self.envelope * 0.1
+        self.output = self.bass_filter * self.envelope * self.volume_sig
         self.output.out()
 
         self.osc_handler = osc_handler or OSCHandler()
@@ -45,18 +51,18 @@ class SoundController:
     def _setup_metro(self):
         """Setup the metro for tempo-based effects"""
         def trigger_env():
-            # Create a short percussive envelope (attack=0.001s, decay=0.1s)
             env = Adsr(attack=0.001, decay=0.1, sustain=0, release=0, dur=0.101)
             self.envelope.value = env
             env.play()
-        self.metro = Metro(time=60.0/self.tempo)
+        self.metro = Metro(time=self.tempo_sig)
         self.metro.function = trigger_env
         self.metro.play()
 
     def adjust_tempo(self, value):
         self.tempo = max(60.0, min(200.0, self.tempo + value))
         print(f"SoundController: Adjusting tempo to {self.tempo}")
-        self.metro.time = 60.0 / self.tempo
+        self.tempo_sig.value = 60.0 / self.tempo
+        self.metro.time = self.tempo_sig
         if self.osc_handler:
             self.osc_handler.send_message("/tempo", self.tempo)
         return self.tempo
@@ -64,7 +70,8 @@ class SoundController:
     def adjust_pitch(self, value):
         self.pitch = max(0.5, min(2.0, self.pitch + value))
         print(f"SoundController: Adjusting pitch to {self.pitch}")
-        # Implement pitch control with Pyo if needed
+        self.pitch_sig.value = self.pitch
+        # If you have a pitch shifter, assign self.pitch_sig to its parameter here
         if self.osc_handler:
             self.osc_handler.send_message("/pitch", self.pitch)
         return self.pitch
@@ -73,7 +80,7 @@ class SoundController:
         self.volume = max(0.0, min(1.0, self.volume + value))
         print(f"SoundController: Adjusting volume to {self.volume}")
         pygame.mixer.music.set_volume(self.volume)
-        self.output.mul = Port(self.volume * 0.2, risetime=0.01, falltime=0.01)
+        self.volume_sig.value = self.volume * 0.2
         if self.osc_handler:
             self.osc_handler.send_message("/volume", self.volume)
         return self.volume
@@ -82,7 +89,7 @@ class SoundController:
         self.bass = max(0.0, min(1.0, self.bass + value))
         print(f"SoundController: Adjusting bass to {self.bass}")
         cutoff = self.bass * 4980 + 20  # Map 0-1 to 20-5000 Hz
-        self.bass_filter.freq = Port(cutoff, risetime=0.05, falltime=0.05)
+        self.bass_freq_sig.value = cutoff
         if self.osc_handler:
             self.osc_handler.send_message("/bass", self.bass)
         return self.bass
@@ -91,7 +98,6 @@ class SoundController:
         if effect_name in self.effects:
             self.effects[effect_name] = max(0.0, min(1.0, value))
             print(f"SoundController: Applying effect {effect_name} with value {self.effects[effect_name]}")
-            # Implement Pyo effects here if needed
             if self.osc_handler:
                 self.osc_handler.send_message(f"/effect/{effect_name}", self.effects[effect_name])
         return self.effects.get(effect_name, 0.0)
