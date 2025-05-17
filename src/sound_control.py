@@ -59,7 +59,7 @@ class SoundController:
     def control_playback(self, command, track_path=None):
         # Default to your custom audio file if none specified
         if track_path is None:
-            track_path = "data/audio/audio2.mp3"
+            track_path = "data/audio/audio3.mp3"
         print(f"SoundController: Playback command {command}, track: {track_path}")
         if command == "play":
             try:
