@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from "react";
-import styles from '/GestureControls.module.css';
+import styles from './GestureControls.module.css';
 
 export default function GestureControls(){
     const [ audioState, setAudioState ]= useState({
