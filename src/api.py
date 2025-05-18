@@ -11,7 +11,7 @@ CORS(app)
 #initializing the sound controller of mine
 sound_controller=SoundController()
 
-@app.route('api/gesture', methods=['POST'])
+@app.route('/api/gesture', methods=['POST'])
 def process_gesture():
     data= request.json
     gesture=data.get('gesture')
