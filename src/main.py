@@ -29,7 +29,7 @@ class AeroMixApp:
         self.setup_osc_handlers()
         
         if not self.training_mode:
-            self.sound_controller.control_playback("play", "data/audio/audio3.mp3")
+            self.sound_controller.control_playback("play", "data/audio/audio2.mp3")
 
     def load_gesture_models(self, model_dir):
         print(f"Loading gesture models from {model_dir}")
@@ -165,7 +165,7 @@ class AeroMixApp:
         elif gesture == "pitch_down":
             self.sound_controller.adjust_pitch(-0.1)
         elif gesture == "play":
-            self.sound_controller.control_playback("play", "data/audio/audio3.mp3")
+            self.sound_controller.control_playback("play", "data/audio/audio2.mp3")
 
     def start_webcam(self):
         for camera_index in range(5):
