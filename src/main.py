@@ -141,11 +141,9 @@ class AeroMixApp:
         elif gesture == "volume_down":
             self.sound_controller.adjust_volume(-0.1)
         elif gesture == "tempo_up":
-            # Increase by 10% of current tempo for more noticeable change
-            self.sound_controller.adjust_tempo(0.1)  # No division in adjust_tempo now
+            self.sound_controller.adjust_tempo(0.1)  # No division in adjust_tempo
         elif gesture == "tempo_down":
-            # Decrease by 10% of current tempo for more noticeable change
-            self.sound_controller.adjust_tempo(-0.1)  # No division in adjust_tempo now
+            self.sound_controller.adjust_tempo(-0.1)  # No division in adjust_tempo
         elif gesture == "bass_up":
             self.sound_controller.adjust_bass(0.1)
         elif gesture == "bass_down":
@@ -163,7 +161,7 @@ class AeroMixApp:
             self.webcam = cv2.VideoCapture(camera_index)
             if self.webcam.isOpened():
                 print(f"Successfully opened camera at index {camera_index}")
-                # Set full HD for full-screen visualization
+                # Set high resolution for better visualization
                 self.webcam.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
                 self.webcam.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
                 return True
@@ -182,6 +180,78 @@ class AeroMixApp:
             self.webcam.release()
         cv2.destroyAllWindows()
         print("Webcam stopped")
+
+    def enhanced_visualization(self, annotated_frame, bar_top=150, bar_bottom=900):
+        # Get frame dimensions
+        frame_height, frame_width = annotated_frame.shape[:2]
+        
+        # Calculate center position for better layout
+        center_y = frame_height // 2
+        
+        # Helper for color interpolation
+        def lerp_color(color1, color2, t):
+            return tuple([int(a + (b - a) * t) for a, b in zip(color1, color2)])
+
+        # Map pitch to color hue (blue to magenta)
+        def pitch_to_color(pitch):
+            t = (pitch - 0.5) / (2.0 - 0.5)
+            hue = int(240 + 60 * t)
+            color = cv2.cvtColor(np.uint8([[[hue,255,255]]]), cv2.COLOR_HSV2BGR)[0][0]
+            return tuple(int(x) for x in color)
+
+        # Calculate positions for circles - evenly spaced across the width
+        circle_spacing = frame_width // 5
+        circle_y = center_y
+        
+        # Volume circle (1/5 of the way across)
+        vol_x = circle_spacing
+        vol_val = self.sound_controller.volume
+        vol_radius = int(np.interp(vol_val, [0.0, 1.0], [30, 100]))
+        vol_color = lerp_color((0, 100, 0), (0, 255, 0), vol_val)
+        cv2.circle(annotated_frame, (vol_x, circle_y), vol_radius, vol_color, -1)
+        cv2.putText(annotated_frame, f"Volume: {int(vol_val*100)}%", 
+                (vol_x - 80, circle_y + 150), 
+                cv2.FONT_HERSHEY_SIMPLEX, 1.2, vol_color, 3)
+
+        # Bass circle (2/5 of the way across)
+        bass_x = circle_spacing * 2
+        bass_val = self.sound_controller.bass
+        bass_radius = int(np.interp(bass_val, [0.0, 1.0], [30, 100]))
+        bass_color = lerp_color((0, 0, 100), (0, 0, 255), bass_val)
+        cv2.circle(annotated_frame, (bass_x, circle_y), bass_radius, bass_color, -1)
+        cv2.putText(annotated_frame, f"Bass: {int(bass_val*100)}%", 
+                (bass_x - 70, circle_y + 150), 
+                cv2.FONT_HERSHEY_SIMPLEX, 1.2, bass_color, 3)
+
+        # Tempo circle with pulsing effect (3/5 of the way across)
+        tempo_x = circle_spacing * 3
+        tempo_val = self.sound_controller.tempo
+        tempo_radius = int(np.interp(tempo_val, [0.5, 2.0], [30, 100]))
+        tempo_color = lerp_color((100, 100, 0), (0, 165, 255), (tempo_val-0.5)/1.5)
+        pulse = int(5 + 10 * np.sin(time.time() * tempo_val * 2 * np.pi))
+        
+        # Draw pulse effect
+        cv2.circle(annotated_frame, (tempo_x, circle_y), tempo_radius + pulse, tempo_color, 3)
+        cv2.circle(annotated_frame, (tempo_x, circle_y), tempo_radius, tempo_color, -1)
+        
+        base_bpm = 120
+        current_bpm = int(tempo_val * base_bpm)
+        cv2.putText(annotated_frame, f"Tempo: {current_bpm} BPM", 
+                (tempo_x - 100, circle_y + 150), 
+                cv2.FONT_HERSHEY_SIMPLEX, 1.2, tempo_color, 3)
+
+        # Pitch circle (4/5 of the way across)
+        pitch_x = circle_spacing * 4
+        pitch_val = self.sound_controller.pitch
+        pitch_radius = int(np.interp(pitch_val, [0.5, 2.0], [30, 100]))
+        pitch_color = pitch_to_color(pitch_val)
+        cv2.circle(annotated_frame, (pitch_x, circle_y), pitch_radius, pitch_color, -1)
+        cv2.putText(annotated_frame, f"Pitch: {pitch_val:.1f}x", 
+                (pitch_x - 80, circle_y + 150), 
+                cv2.FONT_HERSHEY_SIMPLEX, 1.2, pitch_color, 3)
+
+        return annotated_frame
+
 
     def run_recognition(self):
         print("Starting real-time gesture recognition...")
@@ -208,9 +278,14 @@ class AeroMixApp:
         last_gesture_time = 0
         GESTURE_COOLDOWN = 0.5
 
-        # Set OpenCV window to full screen
-        cv2.namedWindow("Recognition Mode", cv2.WND_PROP_FULLSCREEN)
-        cv2.setWindowProperty("Recognition Mode", cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+        # Create a resizable window (not fullscreen by default)
+        cv2.namedWindow("Recognition Mode", cv2.WINDOW_NORMAL)
+        
+        # Set initial window size (can be resized by user)
+        cv2.resizeWindow("Recognition Mode", 1280, 720)
+        
+        # Flag to track fullscreen state
+        is_fullscreen = False
 
         while True:
             ret, frame = self.webcam.read()
@@ -252,103 +327,27 @@ class AeroMixApp:
             if label_timer > 0 and last_label:
                 cv2.putText(
                     annotated_frame, f"{last_label}", (20, 60),
-                    cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 255, 0), 3
+                    cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 255, 0), 3
                 )
                 label_timer -= 1
 
-            # --- Enhanced Visualizer Layout ---
-            bar_top = 150
-            bar_bottom = 900
-            bar_width = 80
-            bar_gap = 120
-
-            # Helper function for color interpolation
-            def lerp_color(color1, color2, t):
-                return tuple([int(a + (b - a) * t) for a, b in zip(color1, color2)])
-
-            # Helper function for pitch-to-color mapping
-            def pitch_to_color(pitch):
-                t = (pitch - 0.5) / (2.0 - 0.5)
-                hue = int(240 + 60 * t)
-                color = cv2.cvtColor(np.uint8([[[hue,255,255]]]), cv2.COLOR_HSV2BGR)[0][0]
-                return tuple(int(x) for x in color)
-
-            # Volume bar
-            vol_left = 200
-            vol_right = vol_left + bar_width
-            vol_val = self.sound_controller.volume
-            vol_bar = int(np.interp(vol_val, [0.0, 1.0], [bar_bottom, bar_top]))
-            vol_color = lerp_color((0, 100, 0), (0, 255, 0), vol_val)
-            cv2.rectangle(annotated_frame, (vol_left, bar_top-10), (vol_right, bar_bottom+10), (30, 30, 30), -1)
-            cv2.rectangle(annotated_frame, (vol_left, bar_top), (vol_right, bar_bottom), (0, 0, 0), 2)
-            cv2.rectangle(annotated_frame, (vol_left, vol_bar), (vol_right, bar_bottom), vol_color, cv2.FILLED)
-            cv2.putText(annotated_frame, "Volume", (vol_left-10, bar_top-40), cv2.FONT_HERSHEY_SIMPLEX, 1.2, vol_color, 3)
-            cv2.putText(
-                annotated_frame,
-                f'{int(vol_val*100)}%',
-                (vol_left-10, bar_bottom+60),
-                cv2.FONT_HERSHEY_SIMPLEX, 1.2, vol_color, 3
-            )
-
-            # Bass bar
-            bass_left = vol_right + bar_gap
-            bass_right = bass_left + bar_width
-            bass_val = self.sound_controller.bass
-            bass_bar = int(np.interp(bass_val, [0.0, 1.0], [bar_bottom, bar_top]))
-            bass_color = lerp_color((0, 0, 100), (0, 0, 255), bass_val)
-            cv2.rectangle(annotated_frame, (bass_left, bar_top-10), (bass_right, bar_bottom+10), (30, 30, 30), -1)
-            cv2.rectangle(annotated_frame, (bass_left, bar_top), (bass_right, bar_bottom), (0, 0, 0), 2)
-            cv2.rectangle(annotated_frame, (bass_left, bass_bar), (bass_right, bar_bottom), bass_color, cv2.FILLED)
-            cv2.putText(annotated_frame, "Bass", (bass_left-5, bar_top-40), cv2.FONT_HERSHEY_SIMPLEX, 1.2, bass_color, 3)
-            cv2.putText(
-                annotated_frame,
-                f'{int(bass_val*100)}%',
-                (bass_left-5, bar_bottom+60),
-                cv2.FONT_HERSHEY_SIMPLEX, 1.2, bass_color, 3
-            )
-
-            # Tempo bar (correctly mapped from multiplier to visualization)
-            tempo_left = bass_right + bar_gap
-            tempo_right = tempo_left + bar_width
-            tempo_val = self.sound_controller.tempo
-            # Map the tempo multiplier (0.5-2.0) to the bar height directly
-            tempo_bar = int(np.interp(tempo_val, [0.5, 2.0], [bar_bottom, bar_top]))
-            # Calculate BPM for display only
-            base_bpm = 120
-            current_bpm = int(tempo_val * base_bpm)
-            tempo_color = lerp_color((100, 100, 0), (0, 165, 255), (tempo_val-0.5)/1.5)
-            pulse = int(5 + 10 * np.sin(time.time() * tempo_val * 2 * np.pi))
-            cv2.rectangle(annotated_frame, (tempo_left-pulse, bar_top-10-pulse), (tempo_right+pulse, bar_bottom+10+pulse), (30, 30, 30), -1)
-            cv2.rectangle(annotated_frame, (tempo_left, bar_top), (tempo_right, bar_bottom), (0, 0, 0), 2)
-            cv2.rectangle(annotated_frame, (tempo_left, tempo_bar), (tempo_right, bar_bottom), tempo_color, cv2.FILLED)
-            cv2.putText(annotated_frame, "Tempo", (tempo_left-5, bar_top-40), cv2.FONT_HERSHEY_SIMPLEX, 1.2, tempo_color, 3)
-            cv2.putText(
-                annotated_frame,
-                f'{current_bpm} BPM',
-                (tempo_left-5, bar_bottom+60),
-                cv2.FONT_HERSHEY_SIMPLEX, 1.2, tempo_color, 3
-            )
-
-            # Pitch bar
-            pitch_left = tempo_right + bar_gap
-            pitch_right = pitch_left + bar_width
-            pitch_val = self.sound_controller.pitch
-            pitch_bar = int(np.interp(pitch_val, [0.5, 2.0], [bar_bottom, bar_top]))
-            pitch_color = pitch_to_color(pitch_val)
-            cv2.rectangle(annotated_frame, (pitch_left, bar_top-10), (pitch_right, bar_bottom+10), (30, 30, 30), -1)
-            cv2.rectangle(annotated_frame, (pitch_left, bar_top), (pitch_right, bar_bottom), (0, 0, 0), 2)
-            cv2.rectangle(annotated_frame, (pitch_left, pitch_bar), (pitch_right, bar_bottom), pitch_color, cv2.FILLED)
-            cv2.putText(annotated_frame, "Pitch", (pitch_left-5, bar_top-40), cv2.FONT_HERSHEY_SIMPLEX, 1.2, pitch_color, 3)
-            cv2.putText(
-                annotated_frame,
-                f'{pitch_val:.1f}x',
-                (pitch_left-5, bar_bottom+60),
-                cv2.FONT_HERSHEY_SIMPLEX, 1.2, pitch_color, 3
-            )
+            # Apply the enhanced circle visualization
+            annotated_frame = self.enhanced_visualization(annotated_frame)
 
             cv2.imshow("Recognition Mode", annotated_frame)
-            if cv2.waitKey(1) & 0xFF == ord('q'):
+            
+            # Handle key presses
+            key = cv2.waitKey(1) & 0xFF
+            if key == ord('q'):
                 break
+            elif key == ord('f'):
+                # Toggle fullscreen
+                is_fullscreen = not is_fullscreen
+                if is_fullscreen:
+                    cv2.setWindowProperty("Recognition Mode", cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+                else:
+                    cv2.setWindowProperty("Recognition Mode", cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_NORMAL)
+                    
         self.stop_webcam()
 
     def start_training(self, address, *args):
@@ -370,6 +369,9 @@ class AeroMixApp:
                 print(f"Started training for gesture: {gesture_name}")
                 print("Webcam activated for training. Press 'q' to stop training.")
                 print("Press 'g' to record a GESTURE sample, 'n' for NEUTRAL sample.")
+                
+                # Create a resizable window for training
+                cv2.namedWindow('Training Mode', cv2.WINDOW_NORMAL)
                 
                 while self.training_mode and self.webcam.isOpened():
                     ret, frame = self.webcam.read()
@@ -401,7 +403,7 @@ class AeroMixApp:
                         cv2.putText(annotated_frame, f"Samples: {sample_count}", (20, 90),
                                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
                     
-                    cv2.imshow('Training Mode - Press q to stop', annotated_frame)
+                    cv2.imshow('Training Mode', annotated_frame)
                     
                     key = cv2.waitKey(1) & 0xFF
                     if key == ord('q'):
@@ -413,6 +415,13 @@ class AeroMixApp:
                     elif key == ord('n'):
                         print("Pressed 'n': Recording neutral sample.")
                         self.record_training_sample(address, "neutral")
+                    elif key == ord('f'):
+                        # Toggle fullscreen
+                        current = cv2.getWindowProperty('Training Mode', cv2.WND_PROP_FULLSCREEN)
+                        if current == cv2.WINDOW_FULLSCREEN:
+                            cv2.setWindowProperty('Training Mode', cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_NORMAL)
+                        else:
+                            cv2.setWindowProperty('Training Mode', cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
             else:
                 print("Could not start webcam for training")
 
@@ -448,7 +457,7 @@ class AeroMixApp:
                 cv2.putText(display_frame, f"Samples: {sample_count}", (20, 90),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
                 
-                cv2.imshow('Training Mode - Press q to stop', display_frame)
+                cv2.imshow('Training Mode', display_frame)
         except Exception as e:
             print(f"Error recording training sample: {e}")
 
