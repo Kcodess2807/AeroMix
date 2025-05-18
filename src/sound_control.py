@@ -54,14 +54,14 @@ class SoundController:
             self.osc_handler.send_message("/bass", self.bass)
 
     def adjust_pitch(self, value):
-        self.pitch = max(0.5, min(2.0, self.pitch + value/10))
+        self.pitch = max(0.5, min(2.0, self.pitch + value))
         self.looper.pitch = self.pitch
         print(f"Pitch adjustment: {self.pitch:.2f}x (linked to tempo)")
         if self.osc_handler:
             self.osc_handler.send_message("/pitch", self.pitch)
 
     def adjust_tempo(self, value):
-        self.tempo = max(0.5, min(2.0, self.tempo + value/20))
+        self.tempo = max(0.5, min(2.0, self.tempo + value))
         self.looper.speed = self.tempo
         print(f"Tempo adjustment: {self.tempo:.2f}x (linked to pitch)")
         if self.osc_handler:

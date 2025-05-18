@@ -4,13 +4,11 @@ import json
 import argparse
 import os
 import numpy as np
-import threading
 from utils.osc_handler import OSCHandler
 from ml.classifier import GestureClassifier
 from ml.trainer import GestureTrainer
 from sound_control import SoundController
 from utils.gesture_Detection import GestureDetector
-from pyo import *
 
 class AeroMixApp:
     def __init__(self, model_dir="model/trained", training_mode=False):
@@ -27,7 +25,6 @@ class AeroMixApp:
         self.gesture_detector = GestureDetector()
         self._detector_released = False
         self.setup_osc_handlers()
-        
         if not self.training_mode:
             self.sound_controller.control_playback("play", "data/audio/audio2.mp3")
 
@@ -37,7 +34,6 @@ class AeroMixApp:
         if not os.path.exists(model_dir):
             os.makedirs(model_dir, exist_ok=True)
             return
-        
         for filename in os.listdir(model_dir):
             if filename.endswith("_model.pkl"):
                 gesture_name = filename.replace("_model.pkl", "")
@@ -47,7 +43,6 @@ class AeroMixApp:
                     print(f"Loaded model for gesture: {gesture_name}")
                 except Exception as e:
                     print(f"Failed to load model for {gesture_name}: {e}")
-        
         print(f"Loaded gestures: {list(self.gestures.keys())}")
 
     @staticmethod
@@ -96,7 +91,6 @@ class AeroMixApp:
                         return
                 else:
                     landmarks = self.reconstruct_landmarks_from_list(args)
-                
                 if self.training_mode:
                     print("Training mode active: not processing landmarks for recognition.")
                 else:
@@ -106,18 +100,15 @@ class AeroMixApp:
 
     def reconstruct_landmarks_from_list(self, args):
         landmarks = {"pose": [], "left_hand": [], "right_hand": []}
-        
         if len(args) > 0 and isinstance(args[0], (list, tuple)):
             coords = args[0]
         else:
             coords = args
-        
         try:
             pose_points = min(33*2, len(coords))
             for i in range(0, pose_points, 2):
                 if i+1 < len(coords):
                     landmarks["pose"].append({"x": float(coords[i]), "y": float(coords[i+1]), "z": 0.0})
-            
             remaining = len(coords) - pose_points
             if remaining > 0:
                 hand_points = min(21*2, remaining)
@@ -126,12 +117,10 @@ class AeroMixApp:
                         landmarks["left_hand"].append({"x": float(coords[i]), "y": float(coords[i+1]), "z": 0.0})
         except Exception as e:
             print(f"Error reconstructing landmarks: {e}")
-        
         return landmarks
 
     def recognize_gesture(self, landmarks):
         detected_gestures = []
-        
         for gesture_name, classifier in self.gestures.items():
             try:
                 features = classifier.preprocess_landmarks(landmarks)
@@ -142,7 +131,6 @@ class AeroMixApp:
                         print(f"Detected gesture: {gesture_name}")
             except Exception as e:
                 print(f"Error predicting with model {gesture_name}: {e}")
-        
         for gesture in detected_gestures:
             self.process_gesture(gesture)
 
@@ -153,9 +141,11 @@ class AeroMixApp:
         elif gesture == "volume_down":
             self.sound_controller.adjust_volume(-0.1)
         elif gesture == "tempo_up":
-            self.sound_controller.adjust_tempo(5.0)
+            # Increase by 10% of current tempo for more noticeable change
+            self.sound_controller.adjust_tempo(0.1)  # No division in adjust_tempo now
         elif gesture == "tempo_down":
-            self.sound_controller.adjust_tempo(-5.0)
+            # Decrease by 10% of current tempo for more noticeable change
+            self.sound_controller.adjust_tempo(-0.1)  # No division in adjust_tempo now
         elif gesture == "bass_up":
             self.sound_controller.adjust_bass(0.1)
         elif gesture == "bass_down":
@@ -173,10 +163,10 @@ class AeroMixApp:
             self.webcam = cv2.VideoCapture(camera_index)
             if self.webcam.isOpened():
                 print(f"Successfully opened camera at index {camera_index}")
-                self.webcam.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-                self.webcam.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+                # Set full HD for full-screen visualization
+                self.webcam.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
+                self.webcam.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
                 return True
-        
         print("Error: Could not open any camera")
         return False
 
@@ -188,12 +178,178 @@ class AeroMixApp:
                 self._detector_released = True
             except Exception as e:
                 print(f"Warning (gesture_detector.release): {e}")
-        
         if self.webcam is not None and self.webcam.isOpened():
             self.webcam.release()
-        
         cv2.destroyAllWindows()
         print("Webcam stopped")
+
+    def run_recognition(self):
+        print("Starting real-time gesture recognition...")
+        print(f"Available gesture models: {list(self.gestures.keys())}")
+        label_map = {
+            "volume_up": "Volume Up",
+            "volume_down": "Volume Down",
+            "bass_up": "Bass Up",
+            "bass_down": "Bass Down",
+            "tempo_up": "Tempo Up",
+            "tempo_down": "Tempo Down",
+            "pitch_up": "Pitch Up",
+            "pitch_down": "Pitch Down",
+            "play": "Play"
+        }
+        if not self.start_webcam():
+            print("Could not open webcam for recognition.")
+            return
+        pred_history = []
+        HISTORY_SIZE = 10
+        PRED_THRESHOLD = 7
+        last_label = ""
+        label_timer = 0
+        last_gesture_time = 0
+        GESTURE_COOLDOWN = 0.5
+
+        # Set OpenCV window to full screen
+        cv2.namedWindow("Recognition Mode", cv2.WND_PROP_FULLSCREEN)
+        cv2.setWindowProperty("Recognition Mode", cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+
+        while True:
+            ret, frame = self.webcam.read()
+            if not ret:
+                break
+            frame = cv2.flip(frame, 1)
+            landmarks, annotated_frame = self.gesture_detector.detect_landmarks(frame)
+            recognized_label = ""
+            pred_this_frame = None
+            current_time = time.time()
+
+            if landmarks and (landmarks["left_hand"] or landmarks["right_hand"]):
+                for gesture_name, classifier in self.gestures.items():
+                    features = classifier.preprocess_landmarks(landmarks)
+                    if features.size > 0:
+                        pred = classifier.predict(features)
+                        if pred == gesture_name:
+                            pred_this_frame = pred
+                            break
+                if pred_this_frame:
+                    pred_history.append(pred_this_frame)
+                    if len(pred_history) > HISTORY_SIZE:
+                        pred_history.pop(0)
+                    if len(pred_history) >= PRED_THRESHOLD:
+                        gesture_counts = {}
+                        for gesture in pred_history:
+                            gesture_counts[gesture] = gesture_counts.get(gesture, 0) + 1
+                        most_common = max(gesture_counts, key=gesture_counts.get, default=None)
+                        if (most_common and
+                            gesture_counts[most_common] >= PRED_THRESHOLD and
+                            current_time - last_gesture_time > GESTURE_COOLDOWN):
+                            self.process_gesture(most_common)
+                            recognized_label = label_map.get(most_common, most_common)
+                            last_label = recognized_label
+                            label_timer = 15
+                            last_gesture_time = current_time
+                            pred_history = []
+
+            if label_timer > 0 and last_label:
+                cv2.putText(
+                    annotated_frame, f"{last_label}", (20, 60),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 255, 0), 3
+                )
+                label_timer -= 1
+
+            # --- Enhanced Visualizer Layout ---
+            bar_top = 150
+            bar_bottom = 900
+            bar_width = 80
+            bar_gap = 120
+
+            # Helper function for color interpolation
+            def lerp_color(color1, color2, t):
+                return tuple([int(a + (b - a) * t) for a, b in zip(color1, color2)])
+
+            # Helper function for pitch-to-color mapping
+            def pitch_to_color(pitch):
+                t = (pitch - 0.5) / (2.0 - 0.5)
+                hue = int(240 + 60 * t)
+                color = cv2.cvtColor(np.uint8([[[hue,255,255]]]), cv2.COLOR_HSV2BGR)[0][0]
+                return tuple(int(x) for x in color)
+
+            # Volume bar
+            vol_left = 200
+            vol_right = vol_left + bar_width
+            vol_val = self.sound_controller.volume
+            vol_bar = int(np.interp(vol_val, [0.0, 1.0], [bar_bottom, bar_top]))
+            vol_color = lerp_color((0, 100, 0), (0, 255, 0), vol_val)
+            cv2.rectangle(annotated_frame, (vol_left, bar_top-10), (vol_right, bar_bottom+10), (30, 30, 30), -1)
+            cv2.rectangle(annotated_frame, (vol_left, bar_top), (vol_right, bar_bottom), (0, 0, 0), 2)
+            cv2.rectangle(annotated_frame, (vol_left, vol_bar), (vol_right, bar_bottom), vol_color, cv2.FILLED)
+            cv2.putText(annotated_frame, "Volume", (vol_left-10, bar_top-40), cv2.FONT_HERSHEY_SIMPLEX, 1.2, vol_color, 3)
+            cv2.putText(
+                annotated_frame,
+                f'{int(vol_val*100)}%',
+                (vol_left-10, bar_bottom+60),
+                cv2.FONT_HERSHEY_SIMPLEX, 1.2, vol_color, 3
+            )
+
+            # Bass bar
+            bass_left = vol_right + bar_gap
+            bass_right = bass_left + bar_width
+            bass_val = self.sound_controller.bass
+            bass_bar = int(np.interp(bass_val, [0.0, 1.0], [bar_bottom, bar_top]))
+            bass_color = lerp_color((0, 0, 100), (0, 0, 255), bass_val)
+            cv2.rectangle(annotated_frame, (bass_left, bar_top-10), (bass_right, bar_bottom+10), (30, 30, 30), -1)
+            cv2.rectangle(annotated_frame, (bass_left, bar_top), (bass_right, bar_bottom), (0, 0, 0), 2)
+            cv2.rectangle(annotated_frame, (bass_left, bass_bar), (bass_right, bar_bottom), bass_color, cv2.FILLED)
+            cv2.putText(annotated_frame, "Bass", (bass_left-5, bar_top-40), cv2.FONT_HERSHEY_SIMPLEX, 1.2, bass_color, 3)
+            cv2.putText(
+                annotated_frame,
+                f'{int(bass_val*100)}%',
+                (bass_left-5, bar_bottom+60),
+                cv2.FONT_HERSHEY_SIMPLEX, 1.2, bass_color, 3
+            )
+
+            # Tempo bar (correctly mapped from multiplier to visualization)
+            tempo_left = bass_right + bar_gap
+            tempo_right = tempo_left + bar_width
+            tempo_val = self.sound_controller.tempo
+            # Map the tempo multiplier (0.5-2.0) to the bar height directly
+            tempo_bar = int(np.interp(tempo_val, [0.5, 2.0], [bar_bottom, bar_top]))
+            # Calculate BPM for display only
+            base_bpm = 120
+            current_bpm = int(tempo_val * base_bpm)
+            tempo_color = lerp_color((100, 100, 0), (0, 165, 255), (tempo_val-0.5)/1.5)
+            pulse = int(5 + 10 * np.sin(time.time() * tempo_val * 2 * np.pi))
+            cv2.rectangle(annotated_frame, (tempo_left-pulse, bar_top-10-pulse), (tempo_right+pulse, bar_bottom+10+pulse), (30, 30, 30), -1)
+            cv2.rectangle(annotated_frame, (tempo_left, bar_top), (tempo_right, bar_bottom), (0, 0, 0), 2)
+            cv2.rectangle(annotated_frame, (tempo_left, tempo_bar), (tempo_right, bar_bottom), tempo_color, cv2.FILLED)
+            cv2.putText(annotated_frame, "Tempo", (tempo_left-5, bar_top-40), cv2.FONT_HERSHEY_SIMPLEX, 1.2, tempo_color, 3)
+            cv2.putText(
+                annotated_frame,
+                f'{current_bpm} BPM',
+                (tempo_left-5, bar_bottom+60),
+                cv2.FONT_HERSHEY_SIMPLEX, 1.2, tempo_color, 3
+            )
+
+            # Pitch bar
+            pitch_left = tempo_right + bar_gap
+            pitch_right = pitch_left + bar_width
+            pitch_val = self.sound_controller.pitch
+            pitch_bar = int(np.interp(pitch_val, [0.5, 2.0], [bar_bottom, bar_top]))
+            pitch_color = pitch_to_color(pitch_val)
+            cv2.rectangle(annotated_frame, (pitch_left, bar_top-10), (pitch_right, bar_bottom+10), (30, 30, 30), -1)
+            cv2.rectangle(annotated_frame, (pitch_left, bar_top), (pitch_right, bar_bottom), (0, 0, 0), 2)
+            cv2.rectangle(annotated_frame, (pitch_left, pitch_bar), (pitch_right, bar_bottom), pitch_color, cv2.FILLED)
+            cv2.putText(annotated_frame, "Pitch", (pitch_left-5, bar_top-40), cv2.FONT_HERSHEY_SIMPLEX, 1.2, pitch_color, 3)
+            cv2.putText(
+                annotated_frame,
+                f'{pitch_val:.1f}x',
+                (pitch_left-5, bar_bottom+60),
+                cv2.FONT_HERSHEY_SIMPLEX, 1.2, pitch_color, 3
+            )
+
+            cv2.imshow("Recognition Mode", annotated_frame)
+            if cv2.waitKey(1) & 0xFF == ord('q'):
+                break
+        self.stop_webcam()
 
     def start_training(self, address, *args):
         print(f"start_training called with args: {args}")
@@ -296,153 +452,6 @@ class AeroMixApp:
         except Exception as e:
             print(f"Error recording training sample: {e}")
 
-    def run_recognition(self):
-        print("Starting real-time gesture recognition...")
-        print(f"Available gesture models: {list(self.gestures.keys())}")
-        label_map = {
-            "volume_up": "Volume Up",
-            "volume_down": "Volume Down",
-            "bass_up": "Bass Up",
-            "bass_down": "Bass Down",
-            "tempo_up": "Tempo Up",
-            "tempo_down": "Tempo Down",
-            "pitch_up": "Pitch Up",
-            "pitch_down": "Pitch Down",
-            "play": "Play"
-        }
-        
-        if not self.start_webcam():
-            print("Could not open webcam for recognition.")
-            return
-        
-        pred_history = []
-        HISTORY_SIZE = 10
-        PRED_THRESHOLD = 7
-        last_label = ""
-        label_timer = 0
-        last_gesture_time = 0
-        GESTURE_COOLDOWN = 0.5
-        
-        while True:
-            ret, frame = self.webcam.read()
-            if not ret:
-                break
-            
-            frame = cv2.flip(frame, 1)
-            landmarks, annotated_frame = self.gesture_detector.detect_landmarks(frame)
-            recognized_label = ""
-            pred_this_frame = None
-            current_time = time.time()
-            
-            if landmarks and (landmarks["left_hand"] or landmarks["right_hand"]):
-                for gesture_name, classifier in self.gestures.items():
-                    features = classifier.preprocess_landmarks(landmarks)
-                    if features.size > 0:
-                        pred = classifier.predict(features)
-                        if pred == gesture_name:
-                            pred_this_frame = pred
-                            break
-                
-                if pred_this_frame:
-                    pred_history.append(pred_this_frame)
-                    if len(pred_history) > HISTORY_SIZE:
-                        pred_history.pop(0)
-                    if len(pred_history) >= PRED_THRESHOLD:
-                        gesture_counts = {}
-                        for gesture in pred_history:
-                            gesture_counts[gesture] = gesture_counts.get(gesture, 0) + 1
-                        most_common = max(gesture_counts, key=gesture_counts.get, default=None)
-                        if (most_common and
-                            gesture_counts[most_common] >= PRED_THRESHOLD and
-                            current_time - last_gesture_time > GESTURE_COOLDOWN):
-                            self.process_gesture(most_common)
-                            recognized_label = label_map.get(most_common, most_common)
-                            last_label = recognized_label
-                            label_timer = 15
-                            last_gesture_time = current_time
-                            pred_history = []
-            
-            if label_timer > 0 and last_label:
-                cv2.putText(
-                    annotated_frame, f"{last_label}", (20, 60),
-                    cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 255, 0), 3
-                )
-                label_timer -= 1
-            
-            # --- Simplified Visualizer Layout ---
-            bar_top = 150
-            bar_bottom = 400
-            bar_width = 50
-            bar_gap = 80  # Increased gap for better spacing
-
-            # Volume bar
-            vol_left = 100
-            vol_right = vol_left + bar_width
-            vol_bar = int(np.interp(self.sound_controller.volume, [0.0, 1.0], [bar_bottom, bar_top]))
-            cv2.rectangle(annotated_frame, (vol_left, bar_top-10), (vol_right, bar_bottom+10), (30, 30, 30), -1)  # background
-            cv2.rectangle(annotated_frame, (vol_left, bar_top), (vol_right, bar_bottom), (0, 0, 0), 2)
-            cv2.rectangle(annotated_frame, (vol_left, vol_bar), (vol_right, bar_bottom), (0, 255, 0), cv2.FILLED)
-            cv2.putText(annotated_frame, "Volume", (vol_left-10, bar_top-20), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,255,0), 2)
-            cv2.putText(
-                annotated_frame,
-                f'{int(self.sound_controller.volume*100)}%',
-                (vol_left-10, bar_bottom+35),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,255,0), 2
-            )
-
-            # Bass bar
-            bass_left = vol_right + bar_gap
-            bass_right = bass_left + bar_width
-            bass_bar = int(np.interp(self.sound_controller.bass, [0.0, 1.0], [bar_bottom, bar_top]))
-            cv2.rectangle(annotated_frame, (bass_left, bar_top-10), (bass_right, bar_bottom+10), (30, 30, 30), -1)
-            cv2.rectangle(annotated_frame, (bass_left, bar_top), (bass_right, bar_bottom), (0, 0, 0), 2)
-            cv2.rectangle(annotated_frame, (bass_left, bass_bar), (bass_right, bar_bottom), (0, 0, 255), cv2.FILLED)
-            cv2.putText(annotated_frame, "Bass", (bass_left-5, bar_top-20), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,0,255), 2)
-            cv2.putText(
-                annotated_frame,
-                f'{int(self.sound_controller.bass*100)}%',
-                (bass_left-5, bar_bottom+35),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,0,255), 2
-            )
-
-            # Tempo bar
-            tempo_left = bass_right + bar_gap
-            tempo_right = tempo_left + bar_width
-            tempo_min = 60
-            tempo_max = 200
-            tempo_bar = int(np.interp(self.sound_controller.tempo, [tempo_min, tempo_max], [bar_bottom, bar_top]))
-            cv2.rectangle(annotated_frame, (tempo_left, bar_top-10), (tempo_right, bar_bottom+10), (30, 30, 30), -1)
-            cv2.rectangle(annotated_frame, (tempo_left, bar_top), (tempo_right, bar_bottom), (0, 0, 0), 2)
-            cv2.rectangle(annotated_frame, (tempo_left, tempo_bar), (tempo_right, bar_bottom), (0, 165, 255), cv2.FILLED)
-            cv2.putText(annotated_frame, "Tempo", (tempo_left-5, bar_top-20), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,165,255), 2)
-            cv2.putText(
-                annotated_frame,
-                f'{int(self.sound_controller.tempo)}',
-                (tempo_left-5, bar_bottom+35),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,165,255), 2
-            )
-
-            # Pitch bar
-            pitch_left = tempo_right + bar_gap
-            pitch_right = pitch_left + bar_width
-            pitch_bar = int(np.interp(self.sound_controller.pitch, [0.5, 2.0], [bar_bottom, bar_top]))
-            cv2.rectangle(annotated_frame, (pitch_left, bar_top-10), (pitch_right, bar_bottom+10), (30, 30, 30), -1)
-            cv2.rectangle(annotated_frame, (pitch_left, bar_top), (pitch_right, bar_bottom), (0, 0, 0), 2)
-            cv2.rectangle(annotated_frame, (pitch_left, pitch_bar), (pitch_right, bar_bottom), (255, 0, 255), cv2.FILLED)
-            cv2.putText(annotated_frame, "Pitch", (pitch_left-5, bar_top-20), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255,0,255), 2)
-            cv2.putText(
-                annotated_frame,
-                f'{self.sound_controller.pitch:.1f}',
-                (pitch_left-5, bar_bottom+35),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255,0,255), 2
-            )
-            
-            cv2.imshow("Recognition Mode", annotated_frame)
-            if cv2.waitKey(1) & 0xFF == ord('q'):
-                break
-        
-        self.stop_webcam()
-
     def stop_training(self, address, *args):
         print("Stopping training...")
         if hasattr(self, 'gesture_detector') and not self._detector_released:
@@ -451,11 +460,9 @@ class AeroMixApp:
                 self._detector_released = True
             except Exception as e:
                 print(f"Warning (gesture_detector.release): {e}")
-        
         self.stop_webcam()
         if self.trainer.stop_training():
             self.load_gesture_models(self.trainer.save_dir)
-        
         self.training_mode = False
         print("Training stopped")
 
@@ -480,14 +487,11 @@ def main():
     parser = argparse.ArgumentParser(description='AEROMIX - Gesture-Based DJ System')
     parser.add_argument('--training', action='store_true', help='Start in training mode')
     parser.add_argument('--model-dir', type=str, default='model/trained', help='Directory for trained models')
-    
     args = parser.parse_args()
-    
     app = AeroMixApp(
         model_dir=args.model_dir,
         training_mode=args.training
     )
-    
     app.run()
 
 if __name__ == "__main__":
