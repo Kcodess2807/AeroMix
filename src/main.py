@@ -13,7 +13,7 @@ from utils.gesture_Detection import GestureDetector
 class AeroMixApp:
     def __init__(self, model_dir="model/trained", training_mode=False):
         print("AeroMixApp: Initializing...")
-        self.osc_handler = OSCHandler(receive_port=5005, send_port=5006)
+        self.osc_handler = OSCHandler(receive_port=5015, send_port=5016)
         self.sound_controller = SoundController(self.osc_handler)
         self.trainer = GestureTrainer(save_dir=model_dir)
         self.gestures = {}
