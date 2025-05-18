@@ -3,6 +3,10 @@ from flask_cors import CORS
 import os
 from sound_control import SoundController
 from ml.classifier import GestureClassifier
+from utils.osc_handler import OSCHandler
+
+#creating the osc handler
+osc_handler = OSCHandler(receive_port=5025, send_port=5026)
 
 #app initialized
 app=Flask(__name__)
@@ -46,10 +50,10 @@ def process_gesture():
 def get_state():
     return jsonify({
         "volume": sound_controller.volume, 
-        "bass": sound_controller.adjust_bass, 
-        "tempo": sound_controller.adjust_tempo, 
-        "pitch": sound_controller.adjust_pitch
+        "bass": sound_controller.bass, 
+        "tempo": sound_controller.tempo, 
+        "pitch": sound_controller.pitch
     })
 
 if __name__=="__main__":
-    app.run(debug=True, port=5000)
+    app.run(debug=False, port=5000)

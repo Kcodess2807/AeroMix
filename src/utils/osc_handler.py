@@ -5,8 +5,8 @@ import json
 import threading
 
 class OSCHandler:
-    def __init__(self, receive_ip="127.0.0.1", receive_port=5005,
-                 send_ip="127.0.0.1", send_port=5006):
+    def __init__(self, receive_ip="127.0.0.1", receive_port=5015,
+                 send_ip="127.0.0.1", send_port=5016):
         print(f"OSCHandler: Initializing with receive_port={receive_port}, send_port={send_port}")
         self.client = udp_client.SimpleUDPClient(send_ip, send_port)
         self.dispatcher = dispatcher.Dispatcher()
