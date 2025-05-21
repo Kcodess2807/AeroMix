@@ -1,107 +1,87 @@
-"use client"
+'use client';
 
-import { useEffect, useRef } from "react"
-import { Button } from "@/components/ui/button"
-import { motion } from "framer-motion"
-import { ArrowDown } from "lucide-react"
-import ParticleBackground from "./particle-background"
+import { FC } from 'react';
+import { motion } from "framer-motion";
 
-export default function HeroSection() {
-  const audioRef = useRef<HTMLAudioElement | null>(null)
+interface HeroSectionProps {
+  onTryDemo: () => void;
+}
 
-  useEffect(() => {
-    // Create audio element for hover sound
-    audioRef.current = new Audio("/sounds/hover.mp3")
-    audioRef.current.volume = 0.2
-
-    return () => {
-      if (audioRef.current) {
-        audioRef.current.pause()
-      }
-    }
-  }, [])
-
-  const playHoverSound = () => {
-    if (audioRef.current) {
-      audioRef.current.currentTime = 0
-      audioRef.current.play().catch((e) => console.error("Audio play failed:", e))
-    }
-  }
-
+const HeroSection: FC<HeroSectionProps> = ({ onTryDemo }) => {
   return (
-    <section className="relative h-screen flex items-center justify-center overflow-hidden">
-      <ParticleBackground />
-
-      <div className="container relative z-10 px-4 md:px-6">
-        <div className="max-w-4xl mx-auto text-center">
-          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.8 }}>
-            <h1 className="text-4xl md:text-6xl lg:text-7xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-cyan-400 via-purple-500 to-pink-500 mb-6">
-              AeroMix
-            </h1>
-          </motion.div>
-
+    <section className="relative h-screen flex flex-col items-center justify-center text-center p-4 overflow-hidden">
+      {/* Animated background particles */}
+      <div className="absolute inset-0 -z-10 pointer-events-none">
+        {[...Array(30)].map((_, i) => (
           <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.8, delay: 0.2 }}
-          >
-            <p className="text-xl md:text-3xl font-light mb-8 text-white/90">
-              Shape Sound With Your Movements – Real-Time Gesture-Based Audio Control
-            </p>
-          </motion.div>
-
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.8, delay: 0.4 }}
-          >
-            <p className="text-lg md:text-xl text-white/70 mb-10 max-w-2xl mx-auto">
-              AeroMix revolutionizes music production and performance by translating physical gestures into precise
-              audio control, creating an intuitive bridge between movement and sound.
-            </p>
-          </motion.div>
-
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.8, delay: 0.6 }}
-            className="flex flex-col sm:flex-row gap-4 justify-center"
-          >
-            <Button
-              size="lg"
-              className="bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white border-0"
-              onMouseEnter={playHoverSound}
-              onClick={() => document.getElementById("features")?.scrollIntoView({ behavior: "smooth" })}
-            >
-              Explore Features
-            </Button>
-            <Button
-              size="lg"
-              variant="outline"
-              className="border-purple-500 text-purple-400 hover:bg-purple-950/30"
-              onMouseEnter={playHoverSound}
-              onClick={() => document.getElementById("demo")?.scrollIntoView({ behavior: "smooth" })}
-            >
-              Try Demo
-            </Button>
-          </motion.div>
-        </div>
+            key={i}
+            className="absolute rounded-full"
+            style={{
+              top: `${Math.random() * 100}%`,
+              left: `${Math.random() * 100}%`,
+              width: `${Math.random() * 6 + 2}px`,
+              height: `${Math.random() * 6 + 2}px`,
+              background: `rgba(${Math.floor(Math.random() * 100 + 100)}, ${Math.floor(Math.random() * 100)}, ${Math.floor(Math.random() * 255)}, 0.7)`,
+              boxShadow: `0 0 ${Math.random() * 10 + 5}px rgba(139,92,246,0.5)`,
+            }}
+            animate={{
+              y: [0, Math.random() * 40 - 20, 0],
+              x: [0, Math.random() * 40 - 20, 0],
+              opacity: [0.7, 1, 0.7]
+            }}
+            transition={{
+              duration: Math.random() * 10 + 10,
+              repeat: Infinity,
+              repeatType: "loop",
+              delay: Math.random() * 5
+            }}
+          />
+        ))}
       </div>
 
-      <motion.div
-        className="absolute bottom-8 left-1/2 transform -translate-x-1/2"
-        animate={{ y: [0, 10, 0] }}
-        transition={{ repeat: Number.POSITIVE_INFINITY, duration: 2 }}
+      <motion.h1 
+        className="text-6xl md:text-8xl font-bold text-purple-400 mb-4"
+        initial={{ opacity: 0, y: 30 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 1 }}
       >
-        <Button
-          variant="ghost"
-          size="icon"
-          className="text-white/60 hover:text-white hover:bg-transparent"
-          onClick={() => document.getElementById("features")?.scrollIntoView({ behavior: "smooth" })}
+        AeroMix
+      </motion.h1>
+      <motion.p 
+        className="text-xl md:text-2xl mb-8"
+        initial={{ opacity: 0, y: 30 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 1, delay: 0.2 }}
+      >
+        Shape Sound With Your Movements – Real-Time Gesture-Based Audio Control
+      </motion.p>
+      <motion.p 
+        className="max-w-xl mx-auto mb-12 text-gray-300"
+        initial={{ opacity: 0, y: 30 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 1, delay: 0.4 }}
+      >
+        AeroMix revolutionizes music production and performance by translating physical gestures into precise audio control, creating an intuitive bridge between movement and sound.
+      </motion.p>
+      <motion.div 
+        className="flex flex-col sm:flex-row justify-center gap-4"
+        initial={{ opacity: 0, y: 30 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 1, delay: 0.6 }}
+      >
+        <button className="bg-purple-600 hover:bg-purple-700 px-8 py-4 rounded-lg text-white font-semibold transition-all transform hover:scale-105">
+          Explore Features
+        </button>
+        <button 
+          onClick={onTryDemo} 
+          className="bg-indigo-800 hover:bg-indigo-700 px-8 py-4 rounded-lg text-white font-semibold transition-all transform hover:scale-105 relative overflow-hidden group"
         >
-          <ArrowDown className="h-8 w-8" />
-        </Button>
+          <span className="relative z-10">Try Demo</span>
+          <span className="absolute inset-0 bg-gradient-to-r from-blue-500 to-purple-600 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></span>
+        </button>
       </motion.div>
     </section>
-  )
-}
+  );
+};
+
+export default HeroSection;
