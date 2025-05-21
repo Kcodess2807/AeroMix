@@ -1,19 +1,23 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useRef, useState, useEffect } from 'react';
+import { motion } from 'framer-motion';
 
 export default function WebcamGestureDetector() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [detectedGesture, setDetectedGesture] = useState<string | null>(null);
 
   const startWebcam = async () => {
     try {
+      console.log("[DEBUG] Requesting webcam access...");
       const stream = await navigator.mediaDevices.getUserMedia({ video: true });
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
         videoRef.current.onloadedmetadata = () => {
-          videoRef.current?.play();
+          console.log("[DEBUG] Video metadata loaded, playing video...");
+          videoRef.current?.play().catch((e) => console.error("[ERROR] Failed to play video:", e));
         };
         setIsStreaming(true);
         setError(null);
@@ -21,7 +25,8 @@ export default function WebcamGestureDetector() {
         sendFramesToBackend();
       }
     } catch (err: any) {
-      setError(`Webcam error: ${err.message}`);
+      const errorMessage = `Webcam error: ${err.message}`;
+      setError(errorMessage);
       console.error("[ERROR] Webcam error:", err);
     }
   };
@@ -36,7 +41,6 @@ export default function WebcamGestureDetector() {
     }
   };
 
-  // Send frames to backend for gesture prediction
   const sendFramesToBackend = () => {
     if (!videoRef.current) return;
     const canvas = document.createElement('canvas');
@@ -49,12 +53,17 @@ export default function WebcamGestureDetector() {
       ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
       const dataUrl = canvas.toDataURL('image/jpeg');
       try {
-        await fetch('/api/gesture-frame', {
+        const response = await fetch('http://127.0.0.1:5000/api/gesture-frame', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ frame: dataUrl }),
         });
-        console.log("[DEBUG] Frame sent to backend");
+        const result = await response.json();
+        console.log("[DEBUG] Backend response:", result);
+        if (result.gestures && result.gestures.length > 0) {
+          setDetectedGesture(result.gestures[0]);
+          setTimeout(() => setDetectedGesture(null), 2000);
+        }
       } catch (e) {
         console.error("[ERROR] Error sending frame to backend:", e);
       }
@@ -63,9 +72,23 @@ export default function WebcamGestureDetector() {
     sendFrame();
   };
 
+  useEffect(() => {
+    return () => stopWebcam(); // Cleanup on unmount
+  }, []);
+
   return (
     <div className="flex flex-col items-center justify-center w-full h-full">
       {error && <div className="text-red-500 mb-4">{error}</div>}
+      {detectedGesture && (
+        <motion.div
+          className="absolute top-4 text-green-500 text-xl font-bold"
+          initial={{ opacity: 0, y: -20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.3 }}
+        >
+          Gesture Detected: {detectedGesture}
+        </motion.div>
+      )}
       <div className="relative w-full aspect-video bg-black/30 rounded-lg overflow-hidden flex items-center justify-center">
         {isStreaming ? (
           <video
@@ -74,7 +97,7 @@ export default function WebcamGestureDetector() {
             playsInline
             muted
             className="w-full h-full object-cover"
-            style={{ background: "black" }}
+            style={{ background: 'black' }}
           />
         ) : (
           <div className="flex flex-col items-center justify-center w-full h-full">
@@ -85,7 +108,7 @@ export default function WebcamGestureDetector() {
       </div>
       <button
         onClick={isStreaming ? stopWebcam : startWebcam}
-        className="mt-6 px-6 py-3 bg-gradient-to-r from-purple-600 to-blue-500 text-white rounded-full font-medium"
+        className="mt-6 px-6 py-3 bg-gradient-to-r from-purple-600 to-blue-500 text-white rounded-full font-medium hover:opacity-90 transition"
       >
         {isStreaming ? "Stop Webcam" : "Activate Gesture Simulation"}
       </button>
