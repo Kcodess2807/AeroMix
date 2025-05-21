@@ -17,7 +17,6 @@ export default function WebcamGestureDetector() {
     };
   }, []);
 
-  // Start sending frames when isStreaming becomes true
   useEffect(() => {
     if (isStreaming) {
       console.log("[DEBUG] isStreaming changed to true, starting frame sending...");
@@ -46,7 +45,7 @@ export default function WebcamGestureDetector() {
         videoRef.current?.play()
           .then(() => {
             console.log("[DEBUG] Video playback started successfully");
-            setIsStreaming(true); // This will trigger the useEffect above
+            setIsStreaming(true);
             setError(null);
             console.log("[DEBUG] Webcam started...");
           })
@@ -118,9 +117,17 @@ export default function WebcamGestureDetector() {
         });
         const result = await response.json();
         console.log("[DEBUG] Backend response:", result);
-        if (result.gestures && result.gestures.length > 0) {
-          setDetectedGesture(result.gestures[0]);
-          setTimeout(() => setDetectedGesture(null), 2000);
+        console.log("[DEBUG] Result gestures:", result.gestures);
+        if (result.status === "success" && result.gestures && result.gestures.length > 0) {
+          const gesture = result.gestures[0];
+          console.log("[DEBUG] Setting detected gesture:", gesture);
+          setDetectedGesture(gesture);
+          setTimeout(() => {
+            console.log("[DEBUG] Clearing detected gesture");
+            setDetectedGesture(null);
+          }, 2000);
+        } else {
+          console.log("[DEBUG] No gestures detected in response");
         }
       } catch (e) {
         console.error("[ERROR] Error sending frame to backend:", e);
