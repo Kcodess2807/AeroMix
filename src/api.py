@@ -17,6 +17,7 @@ sound_controller = SoundController()
 def process_gesture():
     data = request.json
     gesture = data.get('gesture')
+    print(f"[DEBUG] Received gesture command: {gesture}")
     if gesture == "volume_up":
         sound_controller.adjust_volume(0.1)
     elif gesture == "volume_down":
@@ -37,6 +38,7 @@ def process_gesture():
 
 @app.route('/api/state', methods=['GET'])
 def get_state():
+    print("[DEBUG] State requested")
     return jsonify({
         "volume": sound_controller.volume,
         "bass": sound_controller.bass,
@@ -46,6 +48,7 @@ def get_state():
 
 @app.route('/api/gesture-frame', methods=['POST'])
 def gesture_frame():
+    print("[DEBUG] /api/gesture-frame called")  # Add this line!
     data = request.json
     frame_data = data.get('frame')
     if frame_data:
@@ -54,12 +57,11 @@ def gesture_frame():
         img_bytes = base64.b64decode(imgstr)
         nparr = np.frombuffer(img_bytes, np.uint8)
         img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-        # --- Your gesture prediction logic here ---
-        # result = your_gesture_predict_function(img)
-        # return jsonify({"gesture": result})
         print("Received frame for gesture prediction.")
         return jsonify({"status": "frame received"})
+    print("[ERROR] No frame data found in request")
     return jsonify({"error": "No frame"}), 400
+
 
 if __name__ == "__main__":
     app.run(debug=False, port=5000)

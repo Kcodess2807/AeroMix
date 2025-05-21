@@ -17,10 +17,12 @@ export default function WebcamGestureDetector() {
         };
         setIsStreaming(true);
         setError(null);
+        console.log("[DEBUG] Webcam started, beginning to send frames...");
         sendFramesToBackend();
       }
     } catch (err: any) {
       setError(`Webcam error: ${err.message}`);
+      console.error("[ERROR] Webcam error:", err);
     }
   };
 
@@ -30,15 +32,16 @@ export default function WebcamGestureDetector() {
       tracks.forEach(track => track.stop());
       videoRef.current.srcObject = null;
       setIsStreaming(false);
+      console.log("[DEBUG] Webcam stopped");
     }
   };
 
   // Send frames to backend for gesture prediction
-  const sendFramesToBackend = async () => {
+  const sendFramesToBackend = () => {
     if (!videoRef.current) return;
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
-    canvas.width = 224; // Adjust to your model's input size
+    canvas.width = 224;
     canvas.height = 224;
 
     const sendFrame = async () => {
@@ -51,8 +54,9 @@ export default function WebcamGestureDetector() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ frame: dataUrl }),
         });
+        console.log("[DEBUG] Frame sent to backend");
       } catch (e) {
-        // Optionally handle errors
+        console.error("[ERROR] Error sending frame to backend:", e);
       }
       requestAnimationFrame(sendFrame);
     };
@@ -68,6 +72,7 @@ export default function WebcamGestureDetector() {
             ref={videoRef}
             autoPlay
             playsInline
+            muted
             className="w-full h-full object-cover"
             style={{ background: "black" }}
           />
