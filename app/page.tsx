@@ -6,9 +6,9 @@ import TechnologySection from "@/components/technology-section"
 import AboutSection from "@/components/about-section"
 import Footer from "@/components/footer"
 // Fix the extensions to match your actual files (.jsx)
-import GestureControls from "@/components/GestureControls.tsx"
-import AudioVisualizer from "@/components/AudioVisualizer.tsx"
-import WebcamGestureDetector from "@/components/WebcamGestureDetector.tsx"
+import GestureControls from "@/components/GestureControls"
+import AudioVisualizer from "@/components/AudioVisualizer"
+import WebcamGestureDetector from "@/components/WebcamGestureDetector"
 
 export default function Home() {
   return (
