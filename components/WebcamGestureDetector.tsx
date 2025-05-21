@@ -17,6 +17,14 @@ export default function WebcamGestureDetector() {
     };
   }, []);
 
+  // Start sending frames when isStreaming becomes true
+  useEffect(() => {
+    if (isStreaming) {
+      console.log("[DEBUG] isStreaming changed to true, starting frame sending...");
+      sendFramesToBackend();
+    }
+  }, [isStreaming]);
+
   const startWebcam = async () => {
     if (!isMounted) {
       console.log("[DEBUG] Component not yet mounted, delaying webcam start...");
@@ -36,13 +44,17 @@ export default function WebcamGestureDetector() {
       videoRef.current.onloadedmetadata = () => {
         console.log("[DEBUG] Video metadata loaded, attempting to play...");
         videoRef.current?.play()
-          .then(() => console.log("[DEBUG] Video playback started successfully"))
-          .catch((e) => console.error("[ERROR] Failed to play video:", e));
+          .then(() => {
+            console.log("[DEBUG] Video playback started successfully");
+            setIsStreaming(true); // This will trigger the useEffect above
+            setError(null);
+            console.log("[DEBUG] Webcam started...");
+          })
+          .catch((e) => {
+            console.error("[ERROR] Failed to play video:", e);
+            setError("Failed to play video");
+          });
       };
-      setIsStreaming(true);
-      setError(null);
-      console.log("[DEBUG] Webcam started, beginning to send frames...");
-      sendFramesToBackend();
     } catch (err: any) {
       const errorMessage = `Webcam error: ${err.message}`;
       setError(errorMessage);
@@ -56,7 +68,7 @@ export default function WebcamGestureDetector() {
       tracks.forEach(track => track.stop());
       videoRef.current.srcObject = null;
       setIsStreaming(false);
-      console.log("[DEBUG] Webcam stopped");
+      console.log("[DEBUG] Webcam stopped, isStreaming set to false");
     }
   };
 
@@ -75,8 +87,20 @@ export default function WebcamGestureDetector() {
     canvas.height = 224;
 
     const sendFrame = async () => {
-      if (!isStreaming || !videoRef.current || !ctx) {
-        console.log("[DEBUG] Stopping frame sending: streaming stopped or video/context unavailable");
+      console.log("[DEBUG] Checking streaming conditions...");
+      console.log("[DEBUG] isStreaming:", isStreaming);
+      console.log("[DEBUG] videoRef.current:", !!videoRef.current);
+      console.log("[DEBUG] ctx:", !!ctx);
+      if (!isStreaming) {
+        console.log("[DEBUG] Stopping frame sending: isStreaming is false");
+        return;
+      }
+      if (!videoRef.current) {
+        console.log("[DEBUG] Stopping frame sending: videoRef.current is null");
+        return;
+      }
+      if (!ctx) {
+        console.log("[DEBUG] Stopping frame sending: ctx is null");
         return;
       }
       console.log("[DEBUG] Capturing frame...");
