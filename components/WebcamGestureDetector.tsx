@@ -10,11 +10,10 @@ export default function WebcamGestureDetector() {
   const [detectedGesture, setDetectedGesture] = useState<string | null>(null);
   const [isMounted, setIsMounted] = useState(false);
 
-  // Ensure the component is mounted before proceeding
   useEffect(() => {
     setIsMounted(true);
     return () => {
-      stopWebcam(); // Cleanup on unmount
+      stopWebcam();
     };
   }, []);
 
@@ -81,7 +80,10 @@ export default function WebcamGestureDetector() {
         return;
       }
       console.log("[DEBUG] Capturing frame...");
-      ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
+      ctx.save();
+      ctx.scale(-1, 1);
+      ctx.drawImage(videoRef.current, -canvas.width, 0, canvas.width, canvas.height);
+      ctx.restore();
       const dataUrl = canvas.toDataURL('image/jpeg');
       console.log("[DEBUG] Frame captured, sending to backend...");
       try {
@@ -118,14 +120,17 @@ export default function WebcamGestureDetector() {
           Gesture Detected: {detectedGesture}
         </motion.div>
       )}
-      <div className="relative w-full bg-black/30 rounded-lg overflow-hidden flex items-center justify-center" style={{ height: '400px' }}>
+      <div
+        className="relative w-full bg-black/30 rounded-lg overflow-hidden flex items-center justify-center"
+        style={{ height: '500px', maxWidth: '800px' }}
+      >
         <video
           ref={videoRef}
           autoPlay
           playsInline
           muted
           className="w-full h-full object-cover"
-          style={{ background: 'black', width: '100%', height: '100%', display: 'block' }}
+          style={{ background: 'black', width: '100%', height: '100%', display: 'block', transform: 'scaleX(-1)' }}
         />
         {!isStreaming && (
           <div className="absolute flex flex-col items-center justify-center w-full h-full">
