@@ -9,6 +9,7 @@ from utils.osc_handler import OSCHandler
 from ml.classifier import GestureClassifier
 from utils.gesture_Detection import GestureDetector
 import logging
+import traceback
 
 # Suppress MediaPipe warnings
 logging.getLogger('mediapipe').setLevel(logging.ERROR)
@@ -18,8 +19,14 @@ app = Flask(__name__)
 CORS(app)
 
 # Initialize GestureDetector once at startup
-gesture_detector = GestureDetector()
-print("[INFO] GestureDetector initialized at startup")
+try:
+    gesture_detector = GestureDetector()
+    print("[INFO] GestureDetector initialized at startup")
+except Exception as e:
+    print(f"[ERROR] Failed to initialize GestureDetector: {e}")
+    print("[ERROR] Stack trace:")
+    traceback.print_exc()
+    gesture_detector = None
 
 # Track the last detected gesture and timestamp for cooldown
 last_gesture = None
@@ -133,12 +140,31 @@ def gesture_frame():
             return jsonify({"error": "Failed to decode image"}), 500
         print("[DEBUG] Frame decoded successfully, shape:", img.shape)
 
-        # Detect landmarks using the global GestureDetector
-        landmarks, _ = gesture_detector.detect_landmarks(img)
-        if not landmarks:
-            print("[DEBUG] No landmarks detected in frame")
+        # Check if GestureDetector is initialized
+        if gesture_detector is None:
+            print("[ERROR] GestureDetector not initialized")
             return jsonify({"status": "success", "gestures": []})
-        print("[DEBUG] Landmarks detected:", len(landmarks))
+
+        # Detect landmarks using the global GestureDetector
+        print("[DEBUG] Calling detect_landmarks...")
+        landmarks_dict, _ = gesture_detector.detect_landmarks(img)
+        print(f"[DEBUG] Landmarks dictionary: {landmarks_dict}")
+
+        # Convert landmarks_dict to the format expected by GestureClassifier (list of lists)
+        landmarks = []
+        for hand in ['left_hand', 'right_hand']:
+            if landmarks_dict[hand]:
+                hand_landmarks = [
+                    type('Landmark', (), {'x': lm['x'], 'y': lm['y'], 'z': lm['z']})
+                    for lm in landmarks_dict[hand]
+                ]
+                landmarks.append(hand_landmarks)
+                break  # Use the first detected hand
+
+        if not landmarks:
+            print("[DEBUG] No hands detected in frame")
+            return jsonify({"status": "success", "gestures": []})
+        print(f"[DEBUG] Converted landmarks: {len(landmarks)} hands detected, each with {len(landmarks[0]) if landmarks else 0} landmarks")
 
         # Classify gestures
         detected_gestures = []
@@ -154,10 +180,9 @@ def gesture_frame():
                 continue
             print(f"[DEBUG] Features extracted for gesture {gesture_name}:", features.shape)
             prediction = classifier.predict(features)
-            confidence = classifier.predict_proba(features)[0]  # Assuming predict_proba returns probabilities
+            confidence = classifier.predict_proba(features)
             print(f"[Classifier] Prediction: {prediction} with confidence {confidence:.2f}")
             if prediction == gesture_name and confidence > 0.85:
-                # Check cooldown
                 if (last_gesture == gesture_name and 
                     (current_time - last_gesture_time) < COOLDOWN_SECONDS):
                     print(f"[DEBUG] Gesture {gesture_name} ignored due to cooldown")
@@ -170,9 +195,12 @@ def gesture_frame():
             elif confidence < 0.65:
                 print(f"[Classifier] Low confidence: {confidence:.2f}, returning NO_GESTURE")
 
+        print(f"[DEBUG] Returning response: {{'status': 'success', 'gestures': {detected_gestures}}}")
         return jsonify({"status": "success", "gestures": detected_gestures})
     except Exception as e:
         print(f"[ERROR] Gesture processing error: {e}")
+        print("[ERROR] Stack trace:")
+        traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":

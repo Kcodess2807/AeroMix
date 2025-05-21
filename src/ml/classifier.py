@@ -9,50 +9,61 @@ class GestureClassifier:
     def __init__(self, model_path=None):
         self.model = None
         self.scaler = None
+        self.gesture_name = None  # Add gesture_name for logging
         if model_path and os.path.exists(model_path):
             self.load_model(model_path)
-            print(f"[Classifier] Model and scaler loaded from-> {model_path}")
+            print(f"[Classifier] Model and scaler loaded from -> {model_path}")
+            self.gesture_name = os.path.basename(model_path).replace('_model.pkl', '')
         else:
             print("[Classifier] No model loaded, will train from scratch.")
 
     def preprocess_landmarks(self, landmarks):
         """
-        extracting and normalizing hand gestures for gesture recognition
-        focusing on normalised x, y cordinates and key distances for distinct gestures
+        Extracting and normalizing hand gestures for gesture recognition
+        focusing on normalized x, y coordinates and key distances for distinct gestures
         """
-        if not landmarks or (not landmarks["left_hand"] and not landmarks["right_hand"]):
-            return np.array([])
-        
-        # Use the first available hand
-        hand_landmarks = landmarks["left_hand"] if landmarks["left_hand"] else landmarks["right_hand"]
-        
-        if not hand_landmarks or len(hand_landmarks) < 21:  # MediaPipe hand has 21 landmarks
-            return np.array([])
-        
-        #using wrist as the referrence point
-        wrist=hand_landmarks[0]
-        wrist_x, wrist_y= wrist['x'], wrist['y']
+        print(f"[DEBUG] Preprocessing landmarks for gesture: {self.gesture_name}")
+        print(f"[DEBUG] Landmarks received: {len(landmarks)} hands detected")
 
+        if not landmarks:
+            print("[DEBUG] No landmarks provided")
+            return np.array([])
+        
+        # Use the first hand (MediaPipe returns a list of hands)
+        hand_landmarks = landmarks[0]  # Take the first detected hand
+        
+        if not hand_landmarks or len(hand_landmarks) != 21:  # MediaPipe hand has 21 landmarks
+            print(f"[DEBUG] Invalid hand landmarks: {len(hand_landmarks)} landmarks, expected 21")
+            return np.array([])
+        
+        # Convert landmark objects to a dictionary format for easier access
+        hand_landmarks_dict = [
+            {"x": lm.x, "y": lm.y, "z": lm.z if hasattr(lm, 'z') else 0.0}
+            for lm in hand_landmarks
+        ]
+
+        # Using wrist as the reference point
+        wrist = hand_landmarks_dict[0]
+        wrist_x, wrist_y = wrist["x"], wrist["y"]
 
         # Calculate bounding box for normalization
-        x_values = [lm["x"] for lm in hand_landmarks]
-        y_values = [lm["y"] for lm in hand_landmarks]
+        x_values = [lm["x"] for lm in hand_landmarks_dict]
+        y_values = [lm["y"] for lm in hand_landmarks_dict]
         x_range = max(0.001, max(x_values) - min(x_values))
         y_range = max(0.001, max(y_values) - min(y_values))
         
-        features=[]
-
+        features = []
 
         # Normalized x, y coordinates relative to wrist
-        for lm in hand_landmarks:
+        for lm in hand_landmarks_dict:
             norm_x = (lm["x"] - wrist_x) / x_range
             norm_y = (lm["y"] - wrist_y) / y_range
             features.extend([norm_x, norm_y])
         
         # Key distances: thumb tip to index tip, index tip to middle tip
-        thumb_tip = hand_landmarks[4]
-        index_tip = hand_landmarks[8]
-        middle_tip = hand_landmarks[12]
+        thumb_tip = hand_landmarks_dict[4]
+        index_tip = hand_landmarks_dict[8]
+        middle_tip = hand_landmarks_dict[12]
         distances = [
             np.sqrt((thumb_tip["x"] - index_tip["x"])**2 + (thumb_tip["y"] - index_tip["y"])**2) / x_range,
             np.sqrt((index_tip["x"] - middle_tip["x"])**2 + (index_tip["y"] - middle_tip["y"])**2) / x_range
@@ -61,11 +72,13 @@ class GestureClassifier:
         
         # Finger-to-wrist distances for curl detection
         for tip_idx in [4, 8, 12, 16, 20]:  # Thumb, index, middle, ring, pinky tips
-            tip = hand_landmarks[tip_idx]
+            tip = hand_landmarks_dict[tip_idx]
             distance = np.sqrt((tip["x"] - wrist_x)**2 + (tip["y"] - wrist_y)**2) / x_range
             features.append(distance)
         
-        return np.array(features).reshape(1, -1)
+        features_array = np.array(features).reshape(1, -1)
+        print(f"[DEBUG] Extracted features: {features_array}, shape: {features_array.shape}")
+        return features_array
 
     def train(self, X, y):
         """Train the gesture classifier"""
