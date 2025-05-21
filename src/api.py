@@ -4,12 +4,23 @@ import base64
 import cv2
 import numpy as np
 import os
+import time
 from utils.osc_handler import OSCHandler
 from ml.classifier import GestureClassifier
+from utils.gesture_Detection import GestureDetector
 
 osc_handler = OSCHandler(receive_port=5025, send_port=5026)
 app = Flask(__name__)
 CORS(app)
+
+# Initialize GestureDetector once at startup
+gesture_detector = GestureDetector()
+print("[INFO] GestureDetector initialized at startup")
+
+# Track the last detected gesture and timestamp for cooldown
+last_gesture = None
+last_gesture_time = 0
+COOLDOWN_SECONDS = 1.0
 
 class SoundController:
     def __init__(self):
@@ -66,6 +77,8 @@ if os.path.exists(model_dir):
             model_path = os.path.join(model_dir, filename)
             gesture_classifiers[gesture_name] = GestureClassifier(model_path)
             print(f"[DEBUG] Loaded model for gesture: {gesture_name}")
+else:
+    print(f"[ERROR] Model directory {model_dir} does not exist")
 
 @app.route('/api/gesture', methods=['POST'])
 def process_gesture():
@@ -96,33 +109,67 @@ def get_state():
 
 @app.route('/api/gesture-frame', methods=['POST'])
 def gesture_frame():
+    global last_gesture, last_gesture_time
+
     print("[DEBUG] /api/gesture-frame called")
     data = request.json
     frame_data = data.get('frame')
-    if frame_data:
-        try:
-            imgstr = frame_data.split(',')[1]
-            img_bytes = base64.b64decode(imgstr)
-            nparr = np.frombuffer(img_bytes, np.uint8)
-            img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-            from utils.gesture_Detection import GestureDetector
-            gesture_detector = GestureDetector()
-            landmarks, _ = gesture_detector.detect_landmarks(img)
-            detected_gestures = []
-            for gesture_name, classifier in gesture_classifiers.items():
-                features = classifier.preprocess_landmarks(landmarks)
-                if features.size > 0:
-                    prediction = classifier.predict(features)
-                    if prediction == gesture_name:
-                        detected_gestures.append(gesture_name)
-                        print(f"[DEBUG] Detected gesture: {gesture_name}")
-                        sound_controller.process_gesture(gesture_name)
-            return jsonify({"status": "success", "gestures": detected_gestures})
-        except Exception as e:
-            print(f"[ERROR] Gesture processing error: {e}")
-            return jsonify({"error": str(e)}), 500
-    print("[ERROR] No frame data found in request")
-    return jsonify({"error": "No frame data"}), 400
+    if not frame_data:
+        print("[ERROR] No frame data found in request")
+        return jsonify({"error": "No frame data"}), 400
+
+    try:
+        # Decode the frame
+        imgstr = frame_data.split(',')[1]
+        img_bytes = base64.b64decode(imgstr)
+        nparr = np.frombuffer(img_bytes, np.uint8)
+        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        if img is None:
+            print("[ERROR] Failed to decode image")
+            return jsonify({"error": "Failed to decode image"}), 500
+        print("[DEBUG] Frame decoded successfully, shape:", img.shape)
+
+        # Detect landmarks using the global GestureDetector
+        landmarks, _ = gesture_detector.detect_landmarks(img)
+        if not landmarks:
+            print("[DEBUG] No landmarks detected in frame")
+            return jsonify({"status": "success", "gestures": []})
+        print("[DEBUG] Landmarks detected:", len(landmarks))
+
+        # Classify gestures
+        detected_gestures = []
+        if not gesture_classifiers:
+            print("[ERROR] No gesture classifiers loaded")
+            return jsonify({"error": "No gesture classifiers loaded"}), 500
+
+        current_time = time.time()
+        for gesture_name, classifier in gesture_classifiers.items():
+            features = classifier.preprocess_landmarks(landmarks)
+            if features.size == 0:
+                print(f"[DEBUG] No features extracted for gesture: {gesture_name}")
+                continue
+            print(f"[DEBUG] Features extracted for gesture {gesture_name}:", features.shape)
+            prediction = classifier.predict(features)
+            confidence = classifier.predict_proba(features)[0]  # Assuming predict_proba returns probabilities
+            print(f"[Classifier] Prediction: {prediction} with confidence {confidence:.2f}")
+            if prediction == gesture_name and confidence > 0.85:
+                # Check cooldown
+                if (last_gesture == gesture_name and 
+                    (current_time - last_gesture_time) < COOLDOWN_SECONDS):
+                    print(f"[DEBUG] Gesture {gesture_name} ignored due to cooldown")
+                    continue
+                detected_gestures.append(gesture_name)
+                print(f"[DEBUG] Detected gesture: {gesture_name}")
+                last_gesture = gesture_name
+                last_gesture_time = current_time
+                sound_controller.process_gesture(gesture_name)
+            elif confidence < 0.65:
+                print(f"[Classifier] Low confidence: {confidence:.2f}, returning NO_GESTURE")
+
+        return jsonify({"status": "success", "gestures": detected_gestures})
+    except Exception as e:
+        print(f"[ERROR] Gesture processing error: {e}")
+        return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
     app.run(debug=False, port=5000)
