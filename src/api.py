@@ -1,59 +1,65 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
+import base64
+import cv2
+import numpy as np
 import os
 from sound_control import SoundController
 from ml.classifier import GestureClassifier
 from utils.osc_handler import OSCHandler
 
-#creating the osc handler
 osc_handler = OSCHandler(receive_port=5025, send_port=5026)
-
-#app initialized
-app=Flask(__name__)
+app = Flask(__name__)
 CORS(app)
-
-#initializing the sound controller of mine
-sound_controller=SoundController()
+sound_controller = SoundController()
 
 @app.route('/api/gesture', methods=['POST'])
 def process_gesture():
-    data= request.json
-    gesture=data.get('gesture')
-
-    #volume control
-    if gesture=="volume_up":
+    data = request.json
+    gesture = data.get('gesture')
+    if gesture == "volume_up":
         sound_controller.adjust_volume(0.1)
-    elif gesture=="volume_down":
+    elif gesture == "volume_down":
         sound_controller.adjust_volume(-0.1)
-    
-    #tempo control
-    elif gesture=="tempo_up":
+    elif gesture == "tempo_up":
         sound_controller.adjust_tempo(0.1)
-    elif gesture=="tempo_down":
+    elif gesture == "tempo_down":
         sound_controller.adjust_tempo(-0.1)
-    
-    #bass control
-    elif gesture=="bass_up":
+    elif gesture == "bass_up":
         sound_controller.adjust_bass(0.1)
-    elif gesture=="bass_down":
+    elif gesture == "bass_down":
         sound_controller.adjust_bass(-0.1)
-    
-    #pitch control
-    elif gesture=="pitch_up":
+    elif gesture == "pitch_up":
         sound_controller.adjust_pitch(0.1)
-    elif gesture=="pitch_down":
+    elif gesture == "pitch_down":
         sound_controller.adjust_pitch(-0.1)
-
     return jsonify({"status": "success", "gesture": gesture})
 
 @app.route('/api/state', methods=['GET'])
 def get_state():
     return jsonify({
-        "volume": sound_controller.volume, 
-        "bass": sound_controller.bass, 
-        "tempo": sound_controller.tempo, 
+        "volume": sound_controller.volume,
+        "bass": sound_controller.bass,
+        "tempo": sound_controller.tempo,
         "pitch": sound_controller.pitch
     })
 
-if __name__=="__main__":
+@app.route('/api/gesture-frame', methods=['POST'])
+def gesture_frame():
+    data = request.json
+    frame_data = data.get('frame')
+    if frame_data:
+        # Remove header: "data:image/jpeg;base64,"
+        imgstr = frame_data.split(',')[1]
+        img_bytes = base64.b64decode(imgstr)
+        nparr = np.frombuffer(img_bytes, np.uint8)
+        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        # --- Your gesture prediction logic here ---
+        # result = your_gesture_predict_function(img)
+        # return jsonify({"gesture": result})
+        print("Received frame for gesture prediction.")
+        return jsonify({"status": "frame received"})
+    return jsonify({"error": "No frame"}), 400
+
+if __name__ == "__main__":
     app.run(debug=False, port=5000)
