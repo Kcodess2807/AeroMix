@@ -8,22 +8,42 @@ export default function WebcamGestureDetector() {
   const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [detectedGesture, setDetectedGesture] = useState<string | null>(null);
+  const [isMounted, setIsMounted] = useState(false);
+
+  // Ensure the component is mounted before proceeding
+  useEffect(() => {
+    setIsMounted(true);
+    return () => {
+      stopWebcam(); // Cleanup on unmount
+    };
+  }, []);
 
   const startWebcam = async () => {
+    if (!isMounted) {
+      console.log("[DEBUG] Component not yet mounted, delaying webcam start...");
+      return;
+    }
+    if (!videoRef.current) {
+      console.error("[ERROR] Video ref is still not available after mount");
+      setError("Video element not found");
+      return;
+    }
     try {
       console.log("[DEBUG] Requesting webcam access...");
       const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        videoRef.current.onloadedmetadata = () => {
-          console.log("[DEBUG] Video metadata loaded, playing video...");
-          videoRef.current?.play().catch((e) => console.error("[ERROR] Failed to play video:", e));
-        };
-        setIsStreaming(true);
-        setError(null);
-        console.log("[DEBUG] Webcam started, beginning to send frames...");
-        sendFramesToBackend();
-      }
+      console.log("[DEBUG] Webcam stream obtained:", stream);
+      videoRef.current.srcObject = stream;
+      console.log("[DEBUG] Stream attached to video element:", videoRef.current.srcObject);
+      videoRef.current.onloadedmetadata = () => {
+        console.log("[DEBUG] Video metadata loaded, attempting to play...");
+        videoRef.current?.play()
+          .then(() => console.log("[DEBUG] Video playback started successfully"))
+          .catch((e) => console.error("[ERROR] Failed to play video:", e));
+      };
+      setIsStreaming(true);
+      setError(null);
+      console.log("[DEBUG] Webcam started, beginning to send frames...");
+      sendFramesToBackend();
     } catch (err: any) {
       const errorMessage = `Webcam error: ${err.message}`;
       setError(errorMessage);
@@ -42,16 +62,28 @@ export default function WebcamGestureDetector() {
   };
 
   const sendFramesToBackend = () => {
-    if (!videoRef.current) return;
+    if (!videoRef.current) {
+      console.error("[ERROR] Video ref is not available for frame sending");
+      return;
+    }
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      console.error("[ERROR] Failed to get canvas context");
+      return;
+    }
     canvas.width = 224;
     canvas.height = 224;
 
     const sendFrame = async () => {
-      if (!isStreaming || !videoRef.current || !ctx) return;
+      if (!isStreaming || !videoRef.current || !ctx) {
+        console.log("[DEBUG] Stopping frame sending: streaming stopped or video/context unavailable");
+        return;
+      }
+      console.log("[DEBUG] Capturing frame...");
       ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
       const dataUrl = canvas.toDataURL('image/jpeg');
+      console.log("[DEBUG] Frame captured, sending to backend...");
       try {
         const response = await fetch('http://127.0.0.1:5000/api/gesture-frame', {
           method: 'POST',
@@ -69,12 +101,9 @@ export default function WebcamGestureDetector() {
       }
       requestAnimationFrame(sendFrame);
     };
+    console.log("[DEBUG] Starting frame sending loop...");
     sendFrame();
   };
-
-  useEffect(() => {
-    return () => stopWebcam(); // Cleanup on unmount
-  }, []);
 
   return (
     <div className="flex flex-col items-center justify-center w-full h-full">
@@ -89,18 +118,17 @@ export default function WebcamGestureDetector() {
           Gesture Detected: {detectedGesture}
         </motion.div>
       )}
-      <div className="relative w-full aspect-video bg-black/30 rounded-lg overflow-hidden flex items-center justify-center">
-        {isStreaming ? (
-          <video
-            ref={videoRef}
-            autoPlay
-            playsInline
-            muted
-            className="w-full h-full object-cover"
-            style={{ background: 'black' }}
-          />
-        ) : (
-          <div className="flex flex-col items-center justify-center w-full h-full">
+      <div className="relative w-full bg-black/30 rounded-lg overflow-hidden flex items-center justify-center" style={{ height: '400px' }}>
+        <video
+          ref={videoRef}
+          autoPlay
+          playsInline
+          muted
+          className="w-full h-full object-cover"
+          style={{ background: 'black', width: '100%', height: '100%', display: 'block' }}
+        />
+        {!isStreaming && (
+          <div className="absolute flex flex-col items-center justify-center w-full h-full">
             <span className="text-6xl text-purple-300">📹</span>
             <p className="text-gray-400">Webcam inactive</p>
           </div>
