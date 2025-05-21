@@ -8,6 +8,10 @@ import time
 from utils.osc_handler import OSCHandler
 from ml.classifier import GestureClassifier
 from utils.gesture_Detection import GestureDetector
+import logging
+
+# Suppress MediaPipe warnings
+logging.getLogger('mediapipe').setLevel(logging.ERROR)
 
 osc_handler = OSCHandler(receive_port=5025, send_port=5026)
 app = Flask(__name__)
