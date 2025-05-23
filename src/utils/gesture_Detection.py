@@ -13,10 +13,11 @@ class GestureDetector:
         try:
             self.hands = self.mp_hands.Hands(
                 static_image_mode=False,
-                max_num_hands=1,  # Focus on one hand for simplicity
-                min_detection_confidence=0.7,
-                min_tracking_confidence=0.7
+                max_num_hands=2,  # Increased from 1
+                min_detection_confidence=0.5,  # Reduced from 0.7
+                min_tracking_confidence=0.5    # Reduced from 0.7
             )
+
             print("GestureDetector: MediaPipe Hands initialized successfully")
         except Exception as e:
             print(f"[ERROR] Failed to initialize MediaPipe Hands: {e}")
