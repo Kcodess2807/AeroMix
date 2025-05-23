@@ -205,6 +205,15 @@ st.markdown("""
         margin: 1rem 0;
         text-align: center;
     }
+    
+    .camera-instructions {
+        background: linear-gradient(135deg, #2196F3 0%, #21CBF3 100%);
+        padding: 1rem;
+        border-radius: 10px;
+        color: white;
+        margin: 1rem 0;
+        text-align: center;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -217,6 +226,7 @@ class GestureVideoProcessor(VideoProcessorBase):
         self.landmarks_detected = False
         self.error_count = 0
         self.max_errors = 5
+        self.frame_count = 0
         
         try:
             self.gesture_detector = GestureDetector()
@@ -241,66 +251,79 @@ class GestureVideoProcessor(VideoProcessorBase):
                         print(f"Failed to load model for {gesture_name}: {e}")
 
     def recv(self, frame):
-        img = frame.to_ndarray(format="bgr24")
-        
-        # Fix the mirroring issue
-        img = cv2.flip(img, 1)
-        
-        # Reset detection status
-        self.detected_gestures = []
-        self.confidence_scores = {}
-        self.landmarks_detected = False
-        
-        if self.gesture_detector is None:
-            # Return original frame with error message if detector failed
-            cv2.putText(img, "Gesture Detector Error", (50, 50), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
-            return av.VideoFrame.from_ndarray(img, format="bgr24")
-        
         try:
-            # Detect landmarks
-            landmarks, annotated_frame = self.gesture_detector.detect_landmarks(img)
+            img = frame.to_ndarray(format="bgr24")
+            self.frame_count += 1
             
-            # Check if landmarks detected
-            self.landmarks_detected = bool(landmarks and (landmarks.get("left_hand") or landmarks.get("right_hand")))
+            # Always flip the image to fix mirroring
+            img = cv2.flip(img, 1)
             
-            # Process landmarks for gesture recognition
-            if self.landmarks_detected:
-                for gesture_name, classifier in self.gestures.items():
-                    try:
-                        # Convert landmarks to the format expected by classifier
-                        processed_landmarks = self.convert_landmarks_format(landmarks)
-                        if processed_landmarks:
-                            features = classifier.preprocess_landmarks(processed_landmarks)
-                            
-                            if features.size > 0:
-                                prediction = classifier.predict(features)
-                                if prediction == gesture_name:
-                                    self.detected_gestures.append(gesture_name)
-                                    # Get confidence if available
-                                    if hasattr(classifier.model, 'predict_proba'):
-                                        try:
-                                            proba = classifier.model.predict_proba(
-                                                classifier.scaler.transform(features)
-                                            )[0]
-                                            self.confidence_scores[gesture_name] = float(proba.max())
-                                        except:
+            # Add frame counter and status overlay
+            cv2.putText(img, f"AeroMix Camera Feed - Frame {self.frame_count}", (10, 30), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+            
+            # Reset detection status
+            self.detected_gestures = []
+            self.confidence_scores = {}
+            self.landmarks_detected = False
+            
+            # Process gestures if detector is available
+            if self.gesture_detector:
+                try:
+                    landmarks, annotated_frame = self.gesture_detector.detect_landmarks(img)
+                    self.landmarks_detected = bool(landmarks and (landmarks.get("left_hand") or landmarks.get("right_hand")))
+                    
+                    if self.landmarks_detected:
+                        cv2.putText(annotated_frame, "Hand Detected!", (10, 70), 
+                                   cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
+                        
+                        # Process gestures
+                        for gesture_name, classifier in self.gestures.items():
+                            try:
+                                processed_landmarks = self.convert_landmarks_format(landmarks)
+                                if processed_landmarks:
+                                    features = classifier.preprocess_landmarks(processed_landmarks)
+                                    if features.size > 0:
+                                        prediction = classifier.predict(features)
+                                        if prediction == gesture_name:
+                                            self.detected_gestures.append(gesture_name)
                                             self.confidence_scores[gesture_name] = 0.8
-                    except Exception as e:
-                        print(f"Error predicting with model {gesture_name}: {e}")
+                                            # Add gesture overlay
+                                            cv2.putText(annotated_frame, f"Gesture: {gesture_name}", (10, 110), 
+                                                       cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 0), 2)
+                            except Exception as e:
+                                print(f"Error predicting gesture {gesture_name}: {e}")
+                    else:
+                        cv2.putText(annotated_frame, "Show your hand to the camera", (10, 70), 
+                                   cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+                    
+                    return av.VideoFrame.from_ndarray(annotated_frame, format="bgr24")
+                    
+                except Exception as e:
+                    print(f"Error in gesture detection: {e}")
+                    cv2.putText(img, f"Gesture Detection Error", (10, 70), 
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+            else:
+                cv2.putText(img, "Gesture Detector Not Available", (10, 70), 
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 0, 0), 2)
             
-            return av.VideoFrame.from_ndarray(annotated_frame, format="bgr24")
+            return av.VideoFrame.from_ndarray(img, format="bgr24")
             
         except Exception as e:
             self.error_count += 1
-            print(f"Error in gesture processing: {e}")
+            print(f"Critical error in recv(): {e}")
             
-            if self.error_count > self.max_errors:
-                # Add error message to frame
-                cv2.putText(img, f"Detection Error: {str(e)[:50]}", (10, 30), 
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+            # Return a simple error frame
+            if hasattr(frame, 'to_ndarray'):
+                try:
+                    img = frame.to_ndarray(format="bgr24")
+                    cv2.putText(img, f"Processing Error: {str(e)[:50]}", (10, 30), 
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+                    return av.VideoFrame.from_ndarray(img, format="bgr24")
+                except:
+                    pass
             
-            return av.VideoFrame.from_ndarray(img, format="bgr24")
+            return frame
     
     def convert_landmarks_format(self, landmarks):
         """Convert landmarks from dict format to list format expected by classifier"""
@@ -669,14 +692,32 @@ def show_live_performance():
     with col1:
         st.markdown("### 📹 Live Camera Feed")
         
-        # Fixed WebRTC streamer with new API
+        # Camera troubleshooting instructions
+        st.markdown("""
+        <div class="camera-instructions">
+            <h4>📋 Camera Setup Instructions</h4>
+            <p>1. Click "START" button below</p>
+            <p>2. Allow camera access when prompted</p>
+            <p>3. If camera doesn't work, try refreshing the page</p>
+            <p>4. Make sure no other apps are using your camera</p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # Enhanced WebRTC streamer with better configuration
         ctx = webrtc_streamer(
             key="gesture-detection",
             video_processor_factory=GestureVideoProcessor,
             rtc_configuration=RTCConfiguration(
                 {"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}
             ),
-            media_stream_constraints={"video": True, "audio": False},
+            media_stream_constraints={
+                "video": {
+                    "width": {"ideal": 640, "max": 1280},
+                    "height": {"ideal": 480, "max": 720},
+                    "frameRate": {"ideal": 30, "max": 60}
+                }, 
+                "audio": False
+            },
             async_processing=True,
         )
         
@@ -725,7 +766,13 @@ def show_live_performance():
                     # Process gesture with cooldown
                     process_detected_gesture(gesture)
         else:
-            st.info("Camera not connected. Please allow camera access and refresh the page.")
+            st.markdown("""
+            <div class="warning-card">
+                <h4>⚠️ Camera Not Connected</h4>
+                <p>Please click the START button above and allow camera access.</p>
+                <p>If issues persist, try refreshing the page or using a different browser.</p>
+            </div>
+            """, unsafe_allow_html=True)
     
     with col2:
         # Current track display
@@ -992,7 +1039,7 @@ def show_settings():
             "Detection Confidence",
             min_value=0.1,
             max_value=1.0,
-            value=0.5,  # Lowered for better detection
+            value=0.3,  # Lowered for better detection
             step=0.1,
             help="Minimum confidence for hand detection"
         )
@@ -1001,7 +1048,7 @@ def show_settings():
             "Tracking Confidence",
             min_value=0.1,
             max_value=1.0,
-            value=0.5,  # Lowered for better detection
+            value=0.3,  # Lowered for better detection
             step=0.1,
             help="Minimum confidence for hand tracking"
         )
