@@ -7,18 +7,25 @@ import plotly.express as px
 from plotly.subplots import make_subplots
 import threading
 import queue
-from streamlit_webrtc import webrtc_streamer, VideoTransformerBase, RTCConfiguration
+from streamlit_webrtc import webrtc_streamer, VideoProcessorBase, RTCConfiguration
 import av
 from streamlit_option_menu import option_menu
 import os
 import tempfile
-from pydub import AudioSegment
+try:
+    from pydub import AudioSegment
+except ImportError:
+    AudioSegment = None
 
-# Import your existing modules
-from utils.gesture_Detection import GestureDetector
-from ml.classifier import GestureClassifier
-from sound_control import SoundController
-from utils.osc_handler import OSCHandler
+# Import your existing modules with error handling
+try:
+    from utils.gesture_Detection import GestureDetector
+    from ml.classifier import GestureClassifier
+    from sound_control import SoundController
+    from utils.osc_handler import OSCHandler
+except ImportError as e:
+    st.error(f"Error importing modules: {e}")
+    st.stop()
 
 # Page configuration
 st.set_page_config(
@@ -181,46 +188,43 @@ st.markdown("""
         100% { transform: translateY(0) scale(1); }
     }
     
-    .control-button {
-        background: linear-gradient(45deg, #667eea, #764ba2);
-        border: none;
+    .error-card {
+        background: linear-gradient(135deg, #ff6b6b 0%, #ee5a52 100%);
+        padding: 1rem;
+        border-radius: 10px;
         color: white;
-        padding: 0.75rem 1.5rem;
-        border-radius: 25px;
-        cursor: pointer;
-        transition: all 0.3s ease;
-        font-weight: 600;
-        text-transform: uppercase;
-        letter-spacing: 1px;
+        margin: 1rem 0;
+        text-align: center;
     }
     
-    .control-button:hover {
-        transform: translateY(-3px);
-        box-shadow: 0 10px 20px rgba(0, 0, 0, 0.3);
-        background: linear-gradient(45deg, #764ba2, #667eea);
-    }
-    
-    .control-button:active {
-        transform: translateY(-1px);
-        animation: buttonPress 0.2s ease-in-out;
-    }
-    
-    @keyframes buttonPress {
-        0% { transform: scale(1); }
-        50% { transform: scale(0.95); }
-        100% { transform: scale(1); }
+    .warning-card {
+        background: linear-gradient(135deg, #ffa726 0%, #ff9800 100%);
+        padding: 1rem;
+        border-radius: 10px;
+        color: white;
+        margin: 1rem 0;
+        text-align: center;
     }
 </style>
 """, unsafe_allow_html=True)
 
-class GestureVideoTransformer(VideoTransformerBase):
+class GestureVideoProcessor(VideoProcessorBase):
     def __init__(self):
-        self.gesture_detector = GestureDetector()
+        self.gesture_detector = None
         self.gestures = {}
-        self.load_gesture_models()
         self.detected_gestures = []
         self.confidence_scores = {}
         self.landmarks_detected = False
+        self.error_count = 0
+        self.max_errors = 5
+        
+        try:
+            self.gesture_detector = GestureDetector()
+            self.load_gesture_models()
+            print("GestureVideoProcessor initialized successfully")
+        except Exception as e:
+            print(f"Error initializing GestureVideoProcessor: {e}")
+            self.gesture_detector = None
         
     def load_gesture_models(self):
         """Load trained gesture models"""
@@ -236,55 +240,80 @@ class GestureVideoTransformer(VideoTransformerBase):
                     except Exception as e:
                         print(f"Failed to load model for {gesture_name}: {e}")
 
-    def transform(self, frame):
+    def recv(self, frame):
         img = frame.to_ndarray(format="bgr24")
         
-        # Fix 1: Flip the image horizontally to correct mirroring
+        # Fix the mirroring issue
         img = cv2.flip(img, 1)
-        
-        # Detect landmarks
-        landmarks, annotated_frame = self.gesture_detector.detect_landmarks(img)
         
         # Reset detection status
         self.detected_gestures = []
         self.confidence_scores = {}
-        self.landmarks_detected = bool(landmarks and (landmarks["left_hand"] or landmarks["right_hand"]))
+        self.landmarks_detected = False
         
-        # Fix 2: Properly process landmarks for gesture recognition
-        if self.landmarks_detected:
-            for gesture_name, classifier in self.gestures.items():
-                try:
-                    # Convert landmarks to the format expected by classifier
-                    processed_landmarks = self.convert_landmarks_format(landmarks)
-                    features = classifier.preprocess_landmarks(processed_landmarks)
-                    
-                    if features.size > 0:
-                        prediction = classifier.predict(features)
-                        if prediction == gesture_name:
-                            self.detected_gestures.append(gesture_name)
-                            # Get confidence if available
-                            if hasattr(classifier.model, 'predict_proba'):
-                                proba = classifier.model.predict_proba(
-                                    classifier.scaler.transform(features)
-                                )[0]
-                                self.confidence_scores[gesture_name] = float(proba.max())
-                except Exception as e:
-                    print(f"Error predicting with model {gesture_name}: {e}")
+        if self.gesture_detector is None:
+            # Return original frame with error message if detector failed
+            cv2.putText(img, "Gesture Detector Error", (50, 50), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+            return av.VideoFrame.from_ndarray(img, format="bgr24")
         
-        return av.VideoFrame.from_ndarray(annotated_frame, format="bgr24")
+        try:
+            # Detect landmarks
+            landmarks, annotated_frame = self.gesture_detector.detect_landmarks(img)
+            
+            # Check if landmarks detected
+            self.landmarks_detected = bool(landmarks and (landmarks.get("left_hand") or landmarks.get("right_hand")))
+            
+            # Process landmarks for gesture recognition
+            if self.landmarks_detected:
+                for gesture_name, classifier in self.gestures.items():
+                    try:
+                        # Convert landmarks to the format expected by classifier
+                        processed_landmarks = self.convert_landmarks_format(landmarks)
+                        if processed_landmarks:
+                            features = classifier.preprocess_landmarks(processed_landmarks)
+                            
+                            if features.size > 0:
+                                prediction = classifier.predict(features)
+                                if prediction == gesture_name:
+                                    self.detected_gestures.append(gesture_name)
+                                    # Get confidence if available
+                                    if hasattr(classifier.model, 'predict_proba'):
+                                        try:
+                                            proba = classifier.model.predict_proba(
+                                                classifier.scaler.transform(features)
+                                            )[0]
+                                            self.confidence_scores[gesture_name] = float(proba.max())
+                                        except:
+                                            self.confidence_scores[gesture_name] = 0.8
+                    except Exception as e:
+                        print(f"Error predicting with model {gesture_name}: {e}")
+            
+            return av.VideoFrame.from_ndarray(annotated_frame, format="bgr24")
+            
+        except Exception as e:
+            self.error_count += 1
+            print(f"Error in gesture processing: {e}")
+            
+            if self.error_count > self.max_errors:
+                # Add error message to frame
+                cv2.putText(img, f"Detection Error: {str(e)[:50]}", (10, 30), 
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+            
+            return av.VideoFrame.from_ndarray(img, format="bgr24")
     
     def convert_landmarks_format(self, landmarks):
         """Convert landmarks from dict format to list format expected by classifier"""
-        # The classifier expects landmarks[0] to be a list of landmark objects
-        converted_landmarks = []
-        
+        if not landmarks:
+            return None
+            
         # Use left_hand if available, otherwise right_hand
-        if landmarks.get("left_hand"):
+        if landmarks.get("left_hand") and len(landmarks["left_hand"]) == 21:
             hand_landmarks = landmarks["left_hand"]
-        elif landmarks.get("right_hand"):
+        elif landmarks.get("right_hand") and len(landmarks["right_hand"]) == 21:
             hand_landmarks = landmarks["right_hand"]
         else:
-            return []
+            return None
         
         # Convert to the format expected by classifier
         class LandmarkObj:
@@ -302,7 +331,14 @@ class GestureVideoTransformer(VideoTransformerBase):
 def initialize_session_state():
     """Initialize session state variables"""
     if 'sound_controller' not in st.session_state:
-        st.session_state.sound_controller = SoundController()
+        try:
+            st.session_state.sound_controller = SoundController()
+            st.session_state.audio_available = True
+        except Exception as e:
+            st.session_state.sound_controller = None
+            st.session_state.audio_available = False
+            st.session_state.audio_error = str(e)
+            
     if 'gesture_history' not in st.session_state:
         st.session_state.gesture_history = []
     if 'audio_metrics' not in st.session_state:
@@ -323,6 +359,10 @@ def initialize_session_state():
 
 def save_uploaded_audio(uploaded_file):
     """Save uploaded audio file and convert to compatible format if needed"""
+    if AudioSegment is None:
+        st.error("Audio processing not available. Please install ffmpeg.")
+        return None
+        
     try:
         # Create temp directory if it doesn't exist
         temp_dir = "temp_audio"
@@ -477,11 +517,22 @@ def show_audio_upload_section():
     </div>
     """, unsafe_allow_html=True)
     
+    if AudioSegment is None:
+        st.markdown("""
+        <div class="warning-card">
+            <h4>⚠️ Audio Processing Limited</h4>
+            <p>FFmpeg not found. Only WAV files supported for upload.</p>
+        </div>
+        """, unsafe_allow_html=True)
+        file_types = ['wav']
+    else:
+        file_types = ['mp3', 'wav', 'ogg', 'm4a', 'flac']
+    
     # File uploader
     uploaded_file = st.file_uploader(
         "Choose an audio file",
-        type=['mp3', 'wav', 'ogg', 'm4a', 'flac'],
-        help="Upload MP3, WAV, OGG, M4A, or FLAC files"
+        type=file_types,
+        help=f"Upload {', '.join(file_types).upper()} files"
     )
     
     if uploaded_file is not None:
@@ -512,13 +563,16 @@ def show_audio_upload_section():
                     st.session_state.current_track = processed_path
                     st.success(f"✅ Audio loaded successfully: {uploaded_file.name}")
                     
-                    # Auto-play the new track
-                    try:
-                        st.session_state.sound_controller.control_playback("play", processed_path)
-                        st.session_state.is_playing = True
-                        st.success("🎵 Now playing your uploaded track!")
-                    except Exception as e:
-                        st.error(f"Error playing audio: {e}")
+                    # Auto-play the new track if audio is available
+                    if st.session_state.audio_available:
+                        try:
+                            st.session_state.sound_controller.control_playback("play", processed_path)
+                            st.session_state.is_playing = True
+                            st.success("🎵 Now playing your uploaded track!")
+                        except Exception as e:
+                            st.error(f"Error playing audio: {e}")
+                    else:
+                        st.info("Audio loaded but playback not available due to audio system issues.")
                 else:
                     st.error("❌ Failed to process audio file")
 
@@ -531,14 +585,29 @@ def show_current_track_info():
     is_uploaded = st.session_state.uploaded_audio_path and current_track == st.session_state.uploaded_audio_path
     track_type = "🎵 Your Upload" if is_uploaded else "🎼 Default Track"
     
+    # Show audio system status
+    audio_status = "🎵 Playing" if st.session_state.is_playing else "⏸️ Stopped"
+    if not st.session_state.audio_available:
+        audio_status = "❌ Audio System Error"
+    
     st.markdown(f"""
     <div class="current-track-display">
         <h4>Currently Loaded Track</h4>
         <p><strong>{track_type}</strong></p>
         <p>📁 {track_name}</p>
-        <p>{"🎵 Playing" if st.session_state.is_playing else "⏸️ Stopped"}</p>
+        <p>{audio_status}</p>
     </div>
     """, unsafe_allow_html=True)
+    
+    # Show audio error if present
+    if not st.session_state.audio_available and hasattr(st.session_state, 'audio_error'):
+        st.markdown(f"""
+        <div class="error-card">
+            <h4>🔧 Audio System Issue</h4>
+            <p>The audio system is running in silent mode. Gestures will be detected but no audio will play.</p>
+            <small>Error: {st.session_state.audio_error[:100]}...</small>
+        </div>
+        """, unsafe_allow_html=True)
 
 def main():
     # Initialize session state
@@ -555,6 +624,12 @@ def main():
     # Sidebar navigation
     with st.sidebar:
         st.markdown("## 🎛️ Control Panel")
+        
+        # Show system status
+        if st.session_state.audio_available:
+            st.success("🔊 Audio System: Ready")
+        else:
+            st.error("🔇 Audio System: Silent Mode")
         
         selected = option_menu(
             menu_title=None,
@@ -594,10 +669,10 @@ def show_live_performance():
     with col1:
         st.markdown("### 📹 Live Camera Feed")
         
-        # WebRTC streamer for real-time video processing
+        # Fixed WebRTC streamer with new API
         ctx = webrtc_streamer(
             key="gesture-detection",
-            video_transformer_factory=GestureVideoTransformer,
+            video_processor_factory=GestureVideoProcessor,
             rtc_configuration=RTCConfiguration(
                 {"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}
             ),
@@ -606,12 +681,12 @@ def show_live_performance():
         )
         
         # Display detected gestures
-        if ctx.video_transformer:
-            transformer = ctx.video_transformer
+        if ctx.video_processor:
+            processor = ctx.video_processor
             
             # Gesture detection status
-            status_color = "status-active" if transformer.landmarks_detected else "status-inactive"
-            status_text = "Hand Detected" if transformer.landmarks_detected else "No Hand Detected"
+            status_color = "status-active" if processor.landmarks_detected else "status-inactive"
+            status_text = "Hand Detected" if processor.landmarks_detected else "No Hand Detected"
             
             st.markdown(f"""
             <div style="margin: 1rem 0;">
@@ -621,10 +696,10 @@ def show_live_performance():
             """, unsafe_allow_html=True)
             
             # Display detected gestures with enhanced animations
-            if transformer.detected_gestures:
+            if processor.detected_gestures:
                 st.markdown("### 🤲 Detected Gestures")
-                for gesture in transformer.detected_gestures:
-                    confidence = transformer.confidence_scores.get(gesture, 0)
+                for gesture in processor.detected_gestures:
+                    confidence = processor.confidence_scores.get(gesture, 0)
                     
                     # Add gesture-specific animation class
                     animation_class = ""
@@ -649,6 +724,8 @@ def show_live_performance():
                     
                     # Process gesture with cooldown
                     process_detected_gesture(gesture)
+        else:
+            st.info("Camera not connected. Please allow camera access and refresh the page.")
     
     with col2:
         # Current track display
@@ -702,17 +779,26 @@ def show_live_performance():
         col_play, col_stop = st.columns(2)
         with col_play:
             if st.button("▶️ Play", key="play_btn", help="Start playback"):
-                if st.session_state.current_track:
-                    st.session_state.sound_controller.control_playback("play", st.session_state.current_track)
-                    st.session_state.is_playing = True
-                    st.success("🎵 Playing!")
+                if st.session_state.current_track and st.session_state.audio_available:
+                    try:
+                        st.session_state.sound_controller.control_playback("play", st.session_state.current_track)
+                        st.session_state.is_playing = True
+                        st.success("🎵 Playing!")
+                    except Exception as e:
+                        st.error(f"Playback error: {e}")
+                elif not st.session_state.audio_available:
+                    st.warning("Audio system not available")
                 else:
                     st.warning("No track loaded")
         with col_stop:
             if st.button("⏹️ Stop", key="stop_btn", help="Stop playback"):
-                st.session_state.sound_controller.control_playback("stop")
-                st.session_state.is_playing = False
-                st.info("⏸️ Stopped")
+                if st.session_state.audio_available:
+                    try:
+                        st.session_state.sound_controller.control_playback("stop")
+                        st.session_state.is_playing = False
+                        st.info("⏸️ Stopped")
+                    except Exception as e:
+                        st.error(f"Stop error: {e}")
 
 def trigger_animation(param_type):
     """Trigger visual feedback for parameter changes"""
@@ -774,18 +860,27 @@ def show_audio_upload():
         col_play, col_stop = st.columns(2)
         with col_play:
             if st.button("▶️ Play", use_container_width=True, key="upload_play"):
-                if st.session_state.current_track:
-                    st.session_state.sound_controller.control_playback("play", st.session_state.current_track)
-                    st.session_state.is_playing = True
-                    st.success("🎵 Playing!")
+                if st.session_state.current_track and st.session_state.audio_available:
+                    try:
+                        st.session_state.sound_controller.control_playback("play", st.session_state.current_track)
+                        st.session_state.is_playing = True
+                        st.success("🎵 Playing!")
+                    except Exception as e:
+                        st.error(f"Playback error: {e}")
+                elif not st.session_state.audio_available:
+                    st.warning("Audio system not available")
                 else:
                     st.warning("No track loaded")
         
         with col_stop:
             if st.button("⏹️ Stop", use_container_width=True, key="upload_stop"):
-                st.session_state.sound_controller.control_playback("stop")
-                st.session_state.is_playing = False
-                st.info("⏸️ Stopped")
+                if st.session_state.audio_available:
+                    try:
+                        st.session_state.sound_controller.control_playback("stop")
+                        st.session_state.is_playing = False
+                        st.info("⏸️ Stopped")
+                    except Exception as e:
+                        st.error(f"Stop error: {e}")
 
 def show_training_mode():
     """Training interface for new gestures"""
@@ -994,53 +1089,67 @@ def process_detected_gesture(gesture):
             return
     
     st.session_state.last_gesture_time[gesture] = current_time
+    
+    # Only process audio if available
+    if not st.session_state.audio_available:
+        return
+        
     sound_controller = st.session_state.sound_controller
     
-    if gesture == "volume_up":
-        sound_controller.adjust_volume(0.1)
-        st.session_state.audio_metrics['volume'] = sound_controller.volume
-    elif gesture == "volume_down":
-        sound_controller.adjust_volume(-0.1)
-        st.session_state.audio_metrics['volume'] = sound_controller.volume
-    elif gesture == "bass_up":
-        sound_controller.adjust_bass(0.1)
-        st.session_state.audio_metrics['bass'] = sound_controller.bass
-    elif gesture == "bass_down":
-        sound_controller.adjust_bass(-0.1)
-        st.session_state.audio_metrics['bass'] = sound_controller.bass
-    elif gesture == "tempo_up":
-        sound_controller.adjust_tempo(0.1)
-        st.session_state.audio_metrics['tempo'] = sound_controller.tempo
-    elif gesture == "tempo_down":
-        sound_controller.adjust_tempo(-0.1)
-        st.session_state.audio_metrics['tempo'] = sound_controller.tempo
-    elif gesture == "pitch_up":
-        sound_controller.adjust_pitch(0.1)
-        st.session_state.audio_metrics['pitch'] = sound_controller.pitch
-    elif gesture == "pitch_down":
-        sound_controller.adjust_pitch(-0.1)
-        st.session_state.audio_metrics['pitch'] = sound_controller.pitch
-    elif gesture == "play":
-        if st.session_state.current_track:
-            sound_controller.control_playback("play", st.session_state.current_track)
-            st.session_state.is_playing = True
+    try:
+        if gesture == "volume_up":
+            sound_controller.adjust_volume(0.1)
+            st.session_state.audio_metrics['volume'] = sound_controller.volume
+        elif gesture == "volume_down":
+            sound_controller.adjust_volume(-0.1)
+            st.session_state.audio_metrics['volume'] = sound_controller.volume
+        elif gesture == "bass_up":
+            sound_controller.adjust_bass(0.1)
+            st.session_state.audio_metrics['bass'] = sound_controller.bass
+        elif gesture == "bass_down":
+            sound_controller.adjust_bass(-0.1)
+            st.session_state.audio_metrics['bass'] = sound_controller.bass
+        elif gesture == "tempo_up":
+            sound_controller.adjust_tempo(0.1)
+            st.session_state.audio_metrics['tempo'] = sound_controller.tempo
+        elif gesture == "tempo_down":
+            sound_controller.adjust_tempo(-0.1)
+            st.session_state.audio_metrics['tempo'] = sound_controller.tempo
+        elif gesture == "pitch_up":
+            sound_controller.adjust_pitch(0.1)
+            st.session_state.audio_metrics['pitch'] = sound_controller.pitch
+        elif gesture == "pitch_down":
+            sound_controller.adjust_pitch(-0.1)
+            st.session_state.audio_metrics['pitch'] = sound_controller.pitch
+        elif gesture == "play":
+            if st.session_state.current_track:
+                sound_controller.control_playback("play", st.session_state.current_track)
+                st.session_state.is_playing = True
+    except Exception as e:
+        print(f"Error processing gesture {gesture}: {e}")
 
 def adjust_audio_parameter(param, value):
     """Manually adjust audio parameters"""
+    if not st.session_state.audio_available:
+        return
+        
     sound_controller = st.session_state.sound_controller
     
-    if param == 'volume':
-        sound_controller.adjust_volume(value)
-        st.session_state.audio_metrics['volume'] = sound_controller.volume
-    elif param == 'bass':
-        sound_controller.adjust_bass(value)
-        st.session_state.audio_metrics['bass'] = sound_controller.bass
-    elif param == 'tempo':
-        sound_controller.adjust_tempo(value)
-        st.session_state.audio_metrics['tempo'] = sound_controller.tempo
-    elif param == 'pitch':
-        sound_controller.adjust_pitch(value)
-        st.session_state.audio_metrics['pitch'] = sound_controller.pitch
+    try:
+        if param == 'volume':
+            sound_controller.adjust_volume(value)
+            st.session_state.audio_metrics['volume'] = sound_controller.volume
+        elif param == 'bass':
+            sound_controller.adjust_bass(value)
+            st.session_state.audio_metrics['bass'] = sound_controller.bass
+        elif param == 'tempo':
+            sound_controller.adjust_tempo(value)
+            st.session_state.audio_metrics['tempo'] = sound_controller.tempo
+        elif param == 'pitch':
+            sound_controller.adjust_pitch(value)
+            st.session_state.audio_metrics['pitch'] = sound_controller.pitch
+    except Exception as e:
+        st.error(f"Error adjusting {param}: {e}")
 
 if __name__ == "__main__":
     main()
